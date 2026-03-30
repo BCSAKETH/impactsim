@@ -24,7 +24,8 @@ export function LoginView() {
         <div className="w-24 h-24 signature-gradient rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-xl shadow-teal-900/20">
           <Zap size={48} fill="currentColor" className="text-white" />
         </div>
-        <h1 className="text-4xl font-headline font-black text-teal-900 mb-4 tracking-tighter">ImpactSim</h1>
+        <h1 className="text-4xl font-headline font-black text-teal-900 mb-2 tracking-tighter">Yukti</h1>
+        <p className="text-teal-600 font-bold mb-4 tracking-wider uppercase text-sm">Master the Art of Execution</p>
         <p className="text-slate-500 mb-12 font-body text-lg leading-relaxed">
           The high-fidelity social entrepreneurship simulation platform.
         </p>

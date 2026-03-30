@@ -1,55 +1,15 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import React, { useState } from 'react';
 import { Sidebar, TopBar } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { SimulationHub } from './components/SimulationHub';
 import { ActiveWorkspace } from './components/ActiveWorkspace';
-import { Budgeting } from './components/Budgeting';
-import { Analytics } from './components/Analytics';
 import { AnimatePresence, motion } from 'motion/react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { auth } from './firebase';
 import { LoginView } from './components/Auth';
 import ErrorBoundary from './components/ErrorBoundary';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { SimulationProvider } from './context/SimulationContext';
 
-// --- Auth Context ---
-interface AuthContextType {
-  user: FirebaseUser | null;
-  loading: boolean;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  return (
-    <AuthContext.Provider value={{ user, loading }}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
+import { Toaster } from 'sonner';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -67,29 +27,12 @@ function AppContent() {
     return <LoginView />;
   }
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <Dashboard />;
-      case 'hub':
-        return <SimulationHub />;
-      case 'workspace':
-        return <ActiveWorkspace />;
-      case 'budgeting':
-        return <Budgeting />;
-      case 'analytics':
-        return <Analytics />;
-      default:
-        return <Dashboard />;
-    }
-  };
-
   return (
     <div className="min-h-screen bg-surface selection:bg-primary/20">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       
       <div className="ml-64 min-h-screen flex flex-col">
-        <TopBar activeTab={activeTab} />
+        <TopBar activeTab={activeTab} setActiveTab={setActiveTab} />
         
         <main className="flex-1 mt-20 p-10 lg:p-16 max-w-7xl mx-auto w-full">
           <AnimatePresence mode="wait">
@@ -100,14 +43,16 @@ function AppContent() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              {renderContent()}
+              {activeTab === 'dashboard' && <Dashboard setActiveTab={setActiveTab} />}
+              {activeTab === 'hub' && <SimulationHub setActiveTab={setActiveTab} />}
+              {activeTab === 'workspace' && <ActiveWorkspace />}
             </motion.div>
           </AnimatePresence>
         </main>
 
         <footer className="p-10 border-t border-slate-200 bg-white/50 text-center">
           <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">
-            ImpactSim © 2026 • Visionary Architect Simulation Engine v4.2.0
+            Yukti © 2026 • Visionary Architect Simulation Engine v4.2.0
           </p>
         </footer>
       </div>
@@ -119,7 +64,10 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <AppContent />
+        <SimulationProvider>
+          <AppContent />
+          <Toaster position="top-right" richColors />
+        </SimulationProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

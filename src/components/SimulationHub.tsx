@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowRight,
   Star,
@@ -7,37 +7,221 @@ import {
   Clock,
   Layers,
   Loader2,
-  CheckCircle
+  CheckCircle,
+  Plus,
+  Sparkles,
+  MessageSquare,
+  X,
+  Info
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { SIMULATIONS } from '../constants';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { db, auth } from '../firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { 
+  doc, 
+  setDoc, 
+  serverTimestamp, 
+  collection, 
+  query, 
+  where, 
+  onSnapshot,
+  addDoc
+} from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { toast } from 'sonner';
+import { useSimulation } from '../context/SimulationContext';
 
-export function SimulationHub() {
-  const [startingId, setStartingId] = useState<string | null>(null);
-  const categories = ['All Scenarios', 'Health', 'Education', 'Environment', 'Poverty Alleviation'];
-  const user = auth.currentUser;
+export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
+  const [loading, setLoading] = useState(true);
+  const [userSims, setUserSims] = useState<any[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [idea, setIdea] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [aiResponse, setAiResponse] = useState<any>(null);
+  
+  const [chatHistory, setChatHistory] = useState<{
+    id: string;
+    role: 'ai' | 'user';
+    text: string;
+    inputType?: 'text' | 'options';
+    options?: string[];
+  }[]>([]);
+  const [currentAnswer, setCurrentAnswer] = useState('');
+  const { user } = useAuth();
+  const { state, startNewSimulation, updateState } = useSimulation();
 
-  const startSimulation = async (sim: any) => {
+  useEffect(() => {
     if (!user) return;
-    setStartingId(sim.id);
+
+    const q = query(collection(db, 'simulations'), where('authorUid', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const sims: any[] = [];
+      snapshot.forEach((doc) => {
+        sims.push({ id: doc.id, ...doc.data() });
+      });
+      setUserSims(sims);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, [user]);
+
+  const handleWizardStep = async (userAnswer?: string) => {
+    if (!idea.trim() && chatHistory.length === 0) return;
+    setIsGenerating(true);
+
+    let updatedHistory = [...chatHistory];
+    if (chatHistory.length === 0) {
+      updatedHistory = [{ id: Math.random().toString(), role: 'user', text: `My Pitch: ${idea}` }];
+      setChatHistory(updatedHistory);
+    } else if (userAnswer) {
+      updatedHistory.push({ id: Math.random().toString(), role: 'user', text: userAnswer });
+      setChatHistory(updatedHistory);
+      setCurrentAnswer('');
+    }
+
+    const userMessageCount = updatedHistory.filter(m => m.role === 'user').length;
+    const forceGenerate = userMessageCount >= 4; // Max 4 interactions
+
     try {
-      await setDoc(doc(db, 'simulations', sim.id), {
-        id: sim.id,
-        title: sim.title,
+      const apiKey = (import.meta as any).env.VITE_GROQ_API_KEY || process.env.GROQ_API_KEY || 'YOUR_GROQ_API_KEY';
+      if (!apiKey || apiKey === 'YOUR_GROQ_API_KEY') {
+        throw new Error('Groq API Key is missing.');
+      }
+
+      const conversationContext = updatedHistory.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\\n');
+
+      const basePrompt = `
+        You are a social entrepreneurship expert. The output MUST be valid JSON.
+        Language constraint: ${state.gameLanguage || 'English'}.
+
+        Conversation so far:
+        ${conversationContext}
+
+        ${forceGenerate 
+          ? 'You have enough information. Generate the final simulation scenario object.' 
+          : 'Analyze the conversation. Ask EXACTLY ONE clarifying question to gather missing details like target audience, specific mechanism, or location. You MUST provide 3-4 diverse "options" for the user to choose from. Only use inputType "text" if the question truly requires an open-ended name or unique description.'
+        }
+
+        If you are asking a question, return strictly this JSON structure:
+        { 
+          "type": "question", 
+          "text": "The question string", 
+          "inputType": "options", // preferred
+          "options": ["Option A", "Option B", "Option C"] 
+        }
+
+        If you are ready to generate the scenario, return strictly this JSON structure:
+        { 
+          "type": "scenario", 
+          "scenario": {
+            "title": "A catchy name",
+            "description": "A detailed 2-3 sentence summary",
+            "category": "Health / Education / Environment / Poverty Alleviation",
+            "difficulty": 2,
+            "impactPotential": 8,
+            "complexity": "Moderate",
+            "timeEstimate": "30 Mins",
+            "image": "keyword for image e.g. solar",
+            "location": "geographic location infered",
+            "stage": "Idea Stage / Validation / MVP"
+          } 
+        }
+      `;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [
+            { role: 'system', content: 'You are a social entrepreneurship expert simulator. MUST OUTPUT STRICT JSON ONLY.' },
+            { role: 'user', content: basePrompt }
+          ],
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate simulation from API');
+      }
+
+      const data = await response.json();
+      const textResponse = data.choices[0]?.message?.content || '{}';
+      const cleanText = textResponse.replace(/^```json/mi, '').replace(/```$/m, '').trim();
+      const result = JSON.parse(cleanText);
+
+      if (result.type === 'question') {
+        setChatHistory(prev => [
+          ...prev, 
+          { 
+            id: Math.random().toString(), 
+            role: 'ai', 
+            text: result.text, 
+            inputType: result.inputType || 'text',
+            options: result.options
+          }
+        ]);
+      } else {
+        setAiResponse(result.scenario);
+      }
+    } catch (error) {
+      console.error('Generation error:', error);
+      toast.error('AI Generation failed. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const goBackOneStep = () => {
+    const newHistory = [...chatHistory];
+    newHistory.pop(); // Remove AI question
+    if (newHistory.length > 0 && newHistory[newHistory.length - 1].role === 'user') {
+      newHistory.pop(); // Remove user answer
+    }
+    setChatHistory(newHistory);
+    setCurrentAnswer('');
+  };
+
+  const saveSimulation = async () => {
+    if (!aiResponse || !user) return;
+    setIsGenerating(true);
+    try {
+      const docRef = await addDoc(collection(db, 'simulations'), {
+        ...aiResponse,
         status: 'Running',
         progress: 0,
         authorUid: user.uid,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        image: `https://picsum.photos/seed/${aiResponse.image || 'impact'}/800/400`
       });
-      // In a real app, we would navigate to the simulation workspace
-      alert(`Simulation "${sim.title}" started and synced to cloud!`);
+
+      await startNewSimulation({
+        id: docRef.id,
+        name: aiResponse.title,
+        region: aiResponse.category,
+        pitch: idea,
+        location: aiResponse.location || '',
+        stage: aiResponse.stage || 'Idea Stage',
+      });
+
+      toast.success('Simulation saved and started!');
+      setIsModalOpen(false);
+      setIdea('');
+      setAiResponse(null);
+      setChatHistory([]);
+      
+      // Delay tab switch slightly to ensure state is committed
+      setTimeout(() => setActiveTab('workspace'), 100);
     } catch (error) {
-      console.error('Start simulation error:', error);
+      console.error('Save error:', error);
+      toast.error('Failed to save simulation.');
     } finally {
-      setStartingId(null);
+      setIsGenerating(false);
     }
   };
 
@@ -51,132 +235,323 @@ export function SimulationHub() {
       <section className="relative">
         <div className="grid grid-cols-12 gap-10 items-end">
           <div className="col-span-12 md:col-span-7">
-            <label className="font-body font-bold text-secondary text-sm tracking-widest uppercase mb-4 block">Simulation Library</label>
+            <label className="font-body font-bold text-secondary text-sm tracking-widest uppercase mb-4 block">Simulation Hub</label>
             <h2 className="font-headline font-extrabold text-5xl text-on-surface leading-tight tracking-tight">
-              Design Your Next <span className="bg-gradient-to-r from-primary to-primary-container bg-clip-text text-transparent italic">Social Masterpiece.</span>
+              Your <span className="bg-gradient-to-r from-primary to-primary-container bg-clip-text text-transparent italic">Impact Portfolio.</span>
             </h2>
             <p className="mt-6 text-lg text-on-surface-variant max-w-xl leading-relaxed">
-              Navigate complex financial models and social impact metrics. Each scenario is a blueprint for real-world change.
+              Create and manage your custom social entrepreneurship scenarios. Powered by AI to turn your vision into a playable blueprint.
             </p>
           </div>
           <div className="col-span-12 md:col-span-5 flex justify-end">
-            <div className="bg-teal-100 p-6 rounded-3xl flex items-center gap-6 shadow-sm">
-              <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center text-white">
-                <Zap size={32} fill="currentColor" />
-              </div>
-              <div>
-                <p className="text-primary font-bold text-2xl">14</p>
-                <p className="text-primary/70 text-sm font-medium">Scenarios Available</p>
-              </div>
-            </div>
+            <button 
+              onClick={() => setIsModalOpen(true)}
+              className="bg-primary text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 shadow-xl hover:scale-105 transition-all active:scale-95"
+            >
+              <Plus size={24} />
+              New Simulation
+            </button>
           </div>
         </div>
       </section>
 
-      {/* Categories */}
-      <div className="flex flex-wrap items-center gap-3">
-        {categories.map((cat, i) => (
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20 space-y-4">
+          <Loader2 className="w-12 h-12 text-primary animate-spin" />
+          <p className="text-slate-400 font-medium">Loading your simulations...</p>
+        </div>
+      ) : userSims.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-32 bg-white/50 border-2 border-dashed border-slate-200 rounded-[3rem] text-center">
+          <div className="w-20 h-20 bg-slate-100 rounded-3xl flex items-center justify-center text-slate-300 mb-6">
+            <Zap size={40} />
+          </div>
+          <h3 className="text-2xl font-headline font-bold text-on-surface mb-2">No Simulations Found</h3>
+          <p className="text-slate-500 max-w-sm mb-8">Start your journey by creating a new AI-powered scenario for your social impact mission.</p>
           <button 
-            key={cat}
-            className={cn(
-              "px-6 py-2.5 rounded-full font-bold text-sm transition-all",
-              i === 0 
-                ? "bg-primary text-white shadow-lg" 
-                : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-            )}
+            onClick={() => setIsModalOpen(true)}
+            className="bg-primary text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 shadow-xl hover:scale-105 transition-all outline-none"
           >
-            {cat}
+            <Plus size={24} />
+            Create Your First Scenario
           </button>
-        ))}
-      </div>
-
-      {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {SIMULATIONS.map((sim) => (
-          <article key={sim.id} className="group relative bg-white rounded-3xl overflow-hidden hover:translate-y-[-4px] transition-all duration-300 border border-slate-100 shadow-sm hover:shadow-xl">
-            <div className="relative h-56 overflow-hidden">
-              <img 
-                src={sim.image} 
-                alt={sim.title} 
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-              <div className="absolute top-4 right-4 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold uppercase tracking-wider">
-                {sim.category}
-              </div>
-            </div>
-            <div className="p-8">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs font-bold text-secondary uppercase tracking-tighter">Difficulty: </span>
-                <div className="flex gap-1">
-                  {[1, 2, 3].map((d) => (
-                    <span key={d} className={cn("w-2 h-2 rounded-full", d <= sim.difficulty ? "bg-primary" : "bg-slate-200")} />
-                  ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {userSims.map((sim) => (
+            <article key={sim.id} className="group relative bg-white rounded-3xl overflow-hidden hover:translate-y-[-4px] transition-all duration-300 border border-slate-100 shadow-sm hover:shadow-xl">
+              <div className="relative h-56 overflow-hidden">
+                <img 
+                  src={sim.image} 
+                  alt={sim.title} 
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                <div className="absolute top-4 right-4 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold uppercase tracking-wider">
+                  {sim.category}
                 </div>
               </div>
-              <h3 className="font-headline font-bold text-2xl text-on-surface mb-3">{sim.title}</h3>
-              <p className="text-on-surface-variant text-sm leading-relaxed mb-8">{sim.description}</p>
-              <button 
-                onClick={() => startSimulation(sim)}
-                disabled={startingId === sim.id}
-                className="w-full py-4 bg-primary text-white rounded-full font-bold flex items-center justify-center gap-2 group-hover:bg-primary-container transition-colors shadow-lg shadow-primary/10 disabled:opacity-50"
+              <div className="p-8">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs font-bold text-secondary uppercase tracking-tighter">Difficulty: </span>
+                  <div className="flex gap-1">
+                    {[1, 2, 3].map((d) => (
+                      <span key={d} className={cn("w-2 h-2 rounded-full", d <= sim.difficulty ? "bg-primary" : "bg-slate-200")} />
+                    ))}
+                  </div>
+                </div>
+                <h3 className="font-headline font-bold text-2xl text-on-surface mb-3">{sim.title}</h3>
+                <p className="text-on-surface-variant text-sm leading-relaxed mb-8 line-clamp-3">{sim.description}</p>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp size={14} className="text-primary" />
+                    <span className="text-xs font-bold text-slate-500">{sim.impactPotential}/10 Impact</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock size={14} className="text-slate-400" />
+                    <span className="text-xs font-bold text-slate-500">{sim.timeEstimate}</span>
+                  </div>
+                </div>
+                <button 
+                onClick={async () => {
+                  try {
+                    // Initialize the workspace with this simulation's data
+                    await startNewSimulation({
+                      id: sim.id,
+                      name: sim.title,
+                      region: sim.category,
+                      pitch: sim.pitch,
+                      location: sim.location,
+                      stage: sim.stage
+                    });
+                    
+                    // Determine phase based on progress
+                    const phase = sim.progress > 50 ? 'execution' : sim.progress > 10 ? 'strategy' : 'discovery';
+                    await updateState({ currentPhase: phase });
+                    
+                    setActiveTab('workspace');
+                  } catch (e) {
+                    toast.error('Failed to resume simulation');
+                  }
+                }}
+                className="w-full flex justify-between items-center py-4 border-t border-slate-100 text-primary font-bold hover:text-teal-700 transition-colors group-hover:border-primary/20"
               >
-                {startingId === sim.id ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <>
-                    Start Simulation
-                    <ArrowRight size={18} />
-                  </>
-                )}
+                Resume Simulation
+                <ArrowRight size={20} className="transform group-hover:translate-x-1 transition-transform" />
               </button>
-            </div>
-          </article>
-        ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
 
-        {/* Featured Card */}
-        <article className="col-span-1 md:col-span-2 lg:col-span-3 grid grid-cols-1 lg:grid-cols-5 bg-teal-900 text-white rounded-3xl overflow-hidden mt-8 shadow-2xl">
-          <div className="lg:col-span-3 p-12 flex flex-col justify-center">
-            <div className="inline-flex items-center gap-2 bg-white/10 px-4 py-1.5 rounded-full mb-6 w-fit">
-              <Star size={14} fill="currentColor" />
-              <span className="text-xs font-bold uppercase tracking-widest">Premium Scenario</span>
-            </div>
-            <h3 className="font-headline font-extrabold text-4xl mb-6">Clean Water Micro-Utility</h3>
-            <p className="text-teal-100 text-lg mb-10 max-w-2xl leading-relaxed">
-              Simulate the lifecycle of a solar-powered desalination hub. Manage supply chain disruptions, variable tariff pricing, and long-term community health outcomes in a high-stakes environment.
-            </p>
-            <div className="flex flex-wrap gap-8 mb-10">
-              <div>
-                <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">Impact Potential</p>
-                <p className="text-2xl font-bold font-headline">9.8/10</p>
-              </div>
-              <div className="w-px h-12 bg-white/10 hidden sm:block"></div>
-              <div>
-                <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">Complexity</p>
-                <p className="text-2xl font-bold font-headline">Advanced</p>
-              </div>
-              <div className="w-px h-12 bg-white/10 hidden sm:block"></div>
-              <div>
-                <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">Time Estimate</p>
-                <p className="text-2xl font-bold font-headline">45 Mins</p>
-              </div>
-            </div>
-            <button className="w-fit px-12 py-5 bg-white text-primary rounded-full font-black text-lg hover:bg-teal-100 transition-colors shadow-lg active:scale-95 duration-150">
-              Launch Advanced Lab
-            </button>
-          </div>
-          <div className="lg:col-span-2 relative min-h-[300px]">
-            <img 
-              src="https://picsum.photos/seed/water-tech/800/800" 
-              alt="Clean Water Project" 
-              className="absolute inset-0 w-full h-full object-cover"
-              referrerPolicy="no-referrer"
+      {/* AI Creation Modal */}
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isGenerating && setIsModalOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-teal-900 via-teal-900/20 to-transparent"></div>
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 md:p-12">
+                <div className="flex justify-between items-start mb-8">
+                  <div>
+                    <h3 className="text-3xl font-headline font-black text-on-surface mb-2">Create Scenario</h3>
+                    <p className="text-on-surface-variant">Describe your social impact idea below.</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsModalOpen(false)}
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+
+                {!aiResponse && chatHistory.length === 0 && (
+                  <div className="space-y-6">
+                    <div className="relative">
+                      <textarea 
+                        value={idea}
+                        onChange={(e) => setIdea(e.target.value)}
+                        placeholder="e.g., A mobile clinic network for rural farmers in Kenya..."
+                        className="w-full h-40 p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl focus:border-primary focus:ring-0 transition-all outline-none resize-none font-body text-lg"
+                      />
+                      <div className="absolute bottom-4 right-4 text-slate-300">
+                        <MessageSquare size={24} />
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleWizardStep()}
+                      disabled={isGenerating || !idea.trim()}
+                      className="w-full py-5 bg-primary text-white rounded-2xl font-black text-xl shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 className="animate-spin" />
+                          Analyzing Idea...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={24} />
+                          Start Wizard
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {chatHistory.length > 0 && !aiResponse && (
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between mb-2">
+                       <button 
+                         onClick={goBackOneStep} 
+                         disabled={isGenerating || chatHistory.length <= 1} 
+                         className="text-sm font-bold text-slate-400 hover:text-primary disabled:opacity-30 transition-colors flex items-center gap-2"
+                       >
+                         <ArrowRight size={16} className="rotate-180" /> Change Answer
+                       </button>
+                       <span className="text-xs font-bold text-slate-300 tracking-widest uppercase">
+                         Step {Math.ceil(chatHistory.length / 2)} / 4
+                       </span>
+                    </div>
+
+                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 max-h-[40vh] overflow-y-auto space-y-4">
+                      {chatHistory.map((msg, idx) => (
+                        <div key={msg.id || idx} className={cn("flex", msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                          <div className={cn(
+                            "max-w-[85%] p-4 rounded-2xl font-body text-sm leading-relaxed",
+                            msg.role === 'user' 
+                              ? 'bg-primary text-white rounded-br-sm shadow-md' 
+                              : 'bg-white border border-slate-200 text-on-surface rounded-bl-sm shadow-sm'
+                          )}>
+                            {msg.text}
+                          </div>
+                        </div>
+                      ))}
+                      {isGenerating && (
+                        <div className="flex justify-start">
+                          <div className="bg-white border border-slate-200 p-4 rounded-2xl rounded-bl-sm flex gap-2">
+                            <span className="w-2 h-2 rounded-full bg-primary/40 animate-bounce" />
+                            <span className="w-2 h-2 rounded-full bg-primary/40 animate-bounce delay-75" />
+                            <span className="w-2 h-2 rounded-full bg-primary/40 animate-bounce delay-150" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {!isGenerating && chatHistory[chatHistory.length - 1]?.role === 'ai' && (
+                      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                        {chatHistory[chatHistory.length - 1].inputType === 'options' && chatHistory[chatHistory.length - 1].options ? (
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                             {chatHistory[chatHistory.length - 1].options?.map((opt, i) => (
+                               <button 
+                                 key={i}
+                                 onClick={() => handleWizardStep(opt)}
+                                 className="p-4 text-left border-2 border-slate-100 rounded-xl hover:border-primary hover:bg-primary/5 transition-all font-medium text-slate-700"
+                               >
+                                 {opt}
+                               </button>
+                             ))}
+                           </div>
+                        ) : (
+                          <div className="flex gap-3">
+                            <input 
+                              type="text"
+                              value={currentAnswer}
+                              onChange={(e) => setCurrentAnswer(e.target.value)}
+                              placeholder="Type your answer here..."
+                              className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-xl focus:border-primary outline-none transition-all"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && currentAnswer.trim()) {
+                                  handleWizardStep(currentAnswer);
+                                }
+                              }}
+                            />
+                            <button 
+                              disabled={!currentAnswer.trim()}
+                              onClick={() => handleWizardStep(currentAnswer)}
+                              className="px-6 bg-primary text-white rounded-xl font-bold hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
+                            >
+                              <ArrowRight size={20} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {aiResponse && (
+                  <div className="space-y-8">
+                    <div className="bg-slate-50 rounded-3xl overflow-hidden border border-slate-100">
+                      <div className="h-40 relative">
+                        <img 
+                          src={`https://picsum.photos/seed/${aiResponse.image}/800/400`} 
+                          alt="Preview" 
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                        <div className="absolute bottom-4 left-4">
+                          <span className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold uppercase tracking-wider">
+                            {aiResponse.category}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-6">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="text-2xl font-headline font-bold text-on-surface">{aiResponse.title}</h4>
+                        </div>
+                        <div className="flex justify-between items-start mb-4">
+                          <p className="text-on-surface-variant text-sm leading-relaxed">{aiResponse.description}</p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="bg-white p-3 rounded-2xl text-center shadow-sm">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Impact</p>
+                            <p className="font-headline font-bold text-primary">{aiResponse.impactPotential}/10</p>
+                          </div>
+                          <div className="bg-white p-3 rounded-2xl text-center shadow-sm">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Difficulty</p>
+                            <p className="font-headline font-bold text-secondary">{aiResponse.difficulty}/3</p>
+                          </div>
+                          <div className="bg-white p-3 rounded-2xl text-center shadow-sm">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Time</p>
+                            <p className="font-headline font-bold text-slate-700">{aiResponse.timeEstimate}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={() => { setAiResponse(null); setChatHistory([]); }}
+                        className="flex-1 py-5 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all"
+                      >
+                        Start Over
+                      </button>
+                      <button 
+                        onClick={saveSimulation}
+                        disabled={isGenerating}
+                        className="flex-[2] py-5 bg-primary text-white rounded-2xl font-black text-xl shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
+                      >
+                        {isGenerating ? <Loader2 className="animate-spin" /> : <CheckCircle size={24} />}
+                        Confirm & Start Execution
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
           </div>
-        </article>
-      </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

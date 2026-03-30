@@ -13,13 +13,17 @@ import {
 import { motion } from 'motion/react';
 import { SIMULATIONS } from '../constants';
 import { cn } from '../lib/utils';
-import { db, auth } from '../firebase';
-import { doc, setDoc, serverTimestamp, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { db } from '../firebase';
+import { doc, setDoc, serverTimestamp, onSnapshot, collection, query, where, addDoc } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
+import { useSimulation } from '../context/SimulationContext';
+import { toast } from 'sonner';
 
-export function Dashboard() {
+export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [syncing, setSyncing] = useState(false);
   const [cloudSims, setCloudSims] = useState<any[]>([]);
-  const user = auth.currentUser;
+  const { user } = useAuth();
+  const { startNewSimulation, state } = useSimulation();
 
   useEffect(() => {
     if (!user) return;
@@ -40,12 +44,20 @@ export function Dashboard() {
     if (!user) return;
     setSyncing(true);
     try {
+      // Syncing hardcoded simulations is no longer needed if we are fully data-driven,
+      // but if the user wants to "seed" their account, we can keep it.
+      // However, the request was to make it data-driven.
       for (const sim of SIMULATIONS) {
-        await setDoc(doc(db, 'simulations', sim.id), {
-          id: sim.id,
+        await addDoc(collection(db, 'simulations'), {
           title: sim.title,
-          status: sim.status || 'Running',
-          progress: sim.progress || 0,
+          description: sim.description,
+          category: sim.category,
+          difficulty: sim.difficulty,
+          impactPotential: sim.impactPotential || 5,
+          timeEstimate: sim.timeEstimate || "20 Mins",
+          image: sim.image,
+          status: 'Running',
+          progress: Math.floor(Math.random() * 100),
           authorUid: user.uid,
           updatedAt: serverTimestamp()
         });
@@ -63,72 +75,82 @@ export function Dashboard() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-16"
     >
-      {/* Welcome Section */}
-      <div className="grid grid-cols-12 gap-10 items-end">
-        <div className="col-span-12 lg:col-span-7">
-          <span className="text-xs font-bold text-secondary tracking-widest uppercase block mb-4">Monday, October 24</span>
-          <h1 className="text-5xl font-headline font-extrabold text-on-surface tracking-tight leading-tight">
-            Welcome back, <span className="text-primary">Architect.</span><br />
-            Your impact is scaling.
-          </h1>
-        </div>
-        <div className="col-span-12 lg:col-span-5 pb-2 flex flex-col items-end gap-4">
-          <p className="text-lg text-on-surface-variant max-w-md font-body text-right">
-            Today's projections show a <span className="text-primary font-bold">+12% surge</span> in stakeholder trust.
-          </p>
-          <button 
-            onClick={syncToCloud}
-            disabled={syncing}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all",
-              cloudSims.length > 0 
-                ? "bg-teal-50 text-teal-700 border border-teal-100" 
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            )}
-          >
-            {syncing ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : cloudSims.length > 0 ? (
-              <Check size={16} />
-            ) : (
-              <Cloud size={16} />
-            )}
-            {syncing ? "Syncing..." : cloudSims.length > 0 ? "Cloud Synced" : "Sync to Cloud"}
-          </button>
-        </div>
-      </div>
+      {(() => {
+        const recentSim = cloudSims.length > 0 ? cloudSims[0] : {
+          title: "Urban Literacy Initiative",
+          description: "Deploy mobile libraries to underserved urban youth to improve early literacy rates. Face challenges with community trust and limited budgets.",
+          image: "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&q=80&w=800",
+          status: 'Phase 3'
+        };
 
-      {/* Bento Grid */}
-      <div className="grid grid-cols-12 gap-10">
-        {/* Hero Card */}
-        <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-3xl signature-gradient p-10 flex flex-col justify-between min-h-[400px] shadow-xl">
-          <div className="absolute top-0 right-0 w-1/2 h-full opacity-20 transform translate-x-1/4">
-            <img 
-              src="https://picsum.photos/seed/blueprint/800/800" 
-              alt="Background" 
-              className="w-full h-full object-cover mix-blend-overlay"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-          <div className="relative z-10">
-            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 text-white text-xs font-bold backdrop-blur-md mb-6 uppercase tracking-wider">
-              <span className="w-2 h-2 rounded-full bg-teal-300 animate-pulse"></span>
-              Last Active: 2h ago
-            </span>
-            <h2 className="text-4xl font-headline font-bold text-white mb-4">Urban Literacy Initiative</h2>
-            <p className="text-teal-100 max-w-md font-body text-lg leading-relaxed">
-              Phase 3: Scaling Educational Infrastructure in Sub-Saharan Metropolitan Zones. You have 4 pending decisions.
-            </p>
-          </div>
-          <div className="relative z-10 flex items-center gap-4">
-            <button className="bg-white text-primary px-8 py-4 rounded-full font-bold text-lg hover:scale-95 transition-all duration-150 flex items-center gap-3 shadow-lg">
-              Resume Simulation <Play size={20} fill="currentColor" />
-            </button>
-            <button className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-full font-bold text-lg backdrop-blur-sm transition-all">
-              View Analytics
-            </button>
-          </div>
-        </div>
+        return (
+          <>
+            {/* Welcome Section */}
+            <div className="grid grid-cols-12 gap-10 items-end">
+              <div className="col-span-12 lg:col-span-7">
+                <span className="text-xs font-bold text-secondary tracking-widest uppercase block mb-4">Monday, October 24</span>
+                <h1 className="text-5xl font-headline font-extrabold text-on-surface tracking-tight leading-tight">
+                  Welcome back to <span className="text-primary">Yukti.</span><br />
+                  Master the art of execution.
+                </h1>
+              </div>
+              <div className="col-span-12 lg:col-span-5 pb-2 flex flex-col items-end gap-4">
+                <p className="text-lg text-on-surface-variant max-w-md font-body text-right">
+                  Today's projections show a <span className="text-primary font-bold">+12% surge</span> in stakeholder trust.
+                </p>
+                <button 
+                  onClick={syncToCloud}
+                  disabled={syncing}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                    cloudSims.length > 0 
+                      ? "bg-teal-50 text-teal-700 border border-teal-100" 
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                >
+                  {syncing ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : cloudSims.length > 0 ? (
+                    <Check size={16} />
+                  ) : (
+                    <Cloud size={16} />
+                  )}
+                  {syncing ? "Syncing..." : cloudSims.length > 0 ? "Cloud Synced" : "Sync to Cloud"}
+                </button>
+              </div>
+            </div>
+
+            {/* Bento Grid */}
+            <div className="grid grid-cols-12 gap-10">
+              {/* Hero Card */}
+              <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-3xl signature-gradient p-10 flex flex-col justify-between min-h-[400px] shadow-xl">
+                <div className="absolute top-0 right-0 w-1/2 h-full opacity-20 transform translate-x-1/4">
+                  <img 
+                    src={recentSim.image} 
+                    alt="Background" 
+                    className="w-full h-full object-cover mix-blend-overlay"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+                <div className="relative z-10">
+                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 text-white text-xs font-bold backdrop-blur-md mb-6 uppercase tracking-wider">
+                    <span className="w-2 h-2 rounded-full bg-teal-300 animate-pulse"></span>
+                    Last Active: 2h ago
+                  </span>
+                  <h2 className="text-4xl font-headline font-bold text-white mb-4 line-clamp-1">{recentSim.title}</h2>
+                  <p className="text-teal-100 max-w-md font-body text-lg leading-relaxed line-clamp-3">
+                    {recentSim.description}
+                  </p>
+                </div>
+                <div className="relative z-10 flex items-center gap-4">
+                  <button onClick={() => setActiveTab('workspace')} className="bg-white text-primary px-8 py-4 rounded-full font-bold text-lg hover:scale-95 transition-all duration-150 flex items-center gap-3 shadow-lg">
+                    Resume Simulation <Play size={20} fill="currentColor" />
+                  </button>
+                  <button onClick={() => setActiveTab('workspace')} className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-full font-bold text-lg backdrop-blur-sm transition-all">
+                    View Analytics
+                  </button>
+                </div>
+              </div>
 
         {/* Metrics Stack */}
         <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
@@ -140,10 +162,12 @@ export function Dashboard() {
               </div>
             </div>
             <div>
-              <div className="text-4xl font-headline font-black text-on-surface">84.2</div>
+              <div className="text-4xl font-headline font-black text-on-surface">{state.impactScore}</div>
               <div className="flex items-center gap-2 mt-2">
-                <span className="text-primary font-bold text-sm">+4.2%</span>
-                <span className="text-slate-400 text-xs">from last week</span>
+                <span className={cn("font-bold text-sm", state.impactScore >= 50 ? "text-primary" : "text-amber-500")}>
+                  {state.impactScore >= 50 ? '+ Trending Up' : 'Needs Focus'}
+                </span>
+                <span className="text-slate-400 text-xs">active session</span>
               </div>
             </div>
           </div>
@@ -156,10 +180,12 @@ export function Dashboard() {
               </div>
             </div>
             <div>
-              <div className="text-4xl font-headline font-black text-on-surface">91%</div>
+              <div className="text-4xl font-headline font-black text-on-surface">{state.trust}%</div>
               <div className="flex items-center gap-2 mt-2">
-                <span className="text-primary font-bold text-sm">Stable</span>
-                <span className="text-slate-400 text-xs">Across all cohorts</span>
+                <span className={cn("font-bold text-sm", state.trust >= 50 ? "text-primary" : "text-amber-500")}>
+                  {state.trust >= 50 ? 'Stable' : 'Critical Warning'}
+                </span>
+                <span className="text-slate-400 text-xs">community trust</span>
               </div>
             </div>
           </div>
@@ -174,8 +200,8 @@ export function Dashboard() {
           <div className="space-y-8">
             <div className="flex items-end justify-between">
               <div>
-                <p className="text-slate-400 text-xs uppercase font-bold tracking-widest mb-1">Burn Rate</p>
-                <p className="text-2xl font-headline font-bold">$12.4k <span className="text-sm font-normal text-slate-400">/mo</span></p>
+                <p className="text-slate-400 text-xs uppercase font-bold tracking-widest mb-1">Current Operating Capital</p>
+                <p className="text-2xl font-headline font-bold">${state.budget.toLocaleString()} <span className="text-sm font-normal text-slate-400">Total</span></p>
               </div>
               <div className="h-16 w-32 flex items-end gap-1">
                 {[40, 60, 55, 80, 95].map((h, i) => (
@@ -192,11 +218,14 @@ export function Dashboard() {
             </div>
             <div className="pt-6 border-t border-slate-100">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-bold text-on-surface-variant">Runway Remaining</span>
-                <span className="text-sm font-bold text-primary">18 Months</span>
+                <span className="text-sm font-bold text-on-surface-variant">Runway Estimate</span>
+                <span className="text-sm font-bold text-primary">{Math.max(1, Math.round((state.budget || 1000) / 1000))} Months</span>
               </div>
               <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full bg-primary w-3/4"></div>
+                <div 
+                  className={cn("h-full transition-all duration-1000", state.budget > 5000 ? "bg-primary" : "bg-amber-500")}
+                  style={{ width: `${Math.min(100, Math.max(10, (state.budget / 15000) * 100))}%` }}
+                ></div>
               </div>
             </div>
           </div>
@@ -206,42 +235,67 @@ export function Dashboard() {
         <div className="col-span-12 lg:col-span-8 bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
           <div className="flex justify-between items-center mb-8">
             <h3 className="font-headline font-bold text-xl text-on-surface">Active Workspace</h3>
-            <button className="text-primary text-sm font-bold hover:underline">View All Simulations</button>
+            <button 
+              onClick={() => setActiveTab('hub')}
+              className="text-primary text-sm font-bold hover:underline"
+            >
+              View All Simulations
+            </button>
           </div>
           <div className="space-y-4">
-            {SIMULATIONS.slice(1, 4).map((sim) => (
-              <div key={sim.id} className="group flex items-center gap-6 p-4 rounded-2xl hover:bg-slate-50 transition-colors duration-200 border border-transparent hover:border-slate-100">
-                <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                  <img src={sim.image} alt={sim.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h4 className="font-headline font-bold text-on-surface group-hover:text-primary transition-colors">{sim.title}</h4>
-                      <p className="text-xs text-slate-400 font-medium">{sim.category}</p>
-                    </div>
-                    <span className={cn(
-                      "px-2 py-1 rounded text-[10px] font-bold uppercase",
-                      sim.status === 'Review Required' ? "bg-red-100 text-red-700" : "bg-teal-100 text-teal-700"
-                    )}>
-                      {sim.status}
-                    </span>
+            {cloudSims.length > 0 ? (
+              cloudSims.slice(0, 3).map((sim, idx) => (
+                <div key={sim.id || idx} className="group flex items-center gap-6 p-4 rounded-2xl hover:bg-slate-50 transition-colors duration-200 border border-transparent hover:border-slate-100">
+                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+                    <img src={sim.image || "https://picsum.photos/seed/impact/200/200"} alt={sim.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-primary" style={{ width: `${sim.progress}%` }}></div>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h4 className="font-headline font-bold text-on-surface group-hover:text-primary transition-colors">{sim.title}</h4>
+                        <p className="text-xs text-slate-400 font-medium">{sim.category}</p>
+                      </div>
+                      <span className={cn(
+                        "px-2 py-1 rounded text-[10px] font-bold uppercase",
+                        sim.status === 'Review Required' ? "bg-red-100 text-red-700" : "bg-teal-100 text-teal-700"
+                      )}>
+                        {sim.status}
+                      </span>
                     </div>
-                    <span className="text-xs font-bold text-on-surface-variant">{sim.progress}%</span>
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-primary" style={{ width: `${sim.progress || 0}%` }}></div>
+                      </div>
+                      <span className="text-xs font-bold text-on-surface-variant">{sim.progress || 0}%</span>
+                    </div>
                   </div>
+                  <button 
+                    onClick={async () => {
+                      await startNewSimulation({
+                        id: sim.id,
+                        name: sim.title,
+                        region: sim.category
+                      });
+                      setActiveTab('workspace');
+                      toast.success(`Resumed: ${sim.title}`);
+                    }}
+                    className="p-2 rounded-full hover:bg-white text-slate-300 hover:text-primary transition-all shadow-sm"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
                 </div>
-                <button className="p-2 rounded-full hover:bg-white text-slate-300 hover:text-primary transition-all shadow-sm">
-                  <ChevronRight size={20} />
-                </button>
+              ))
+            ) : (
+              <div className="py-12 text-center">
+                <p className="text-slate-400 font-medium">No active simulations found.</p>
+                <p className="text-xs text-slate-300 mt-1">Visit the Simulation Hub to start your first one.</p>
               </div>
-            ))}
+            )}
           </div>
         </div>
-      </div>
+        </div>
+        </>
+      )})()}
     </motion.div>
   );
 }
