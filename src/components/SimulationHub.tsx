@@ -12,10 +12,11 @@ import {
   Sparkles,
   MessageSquare,
   X,
-  Info
+  Info,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../lib/utils';
+import { cn, cleanJsonParse } from '../lib/utils';
 import { db, auth } from '../firebase';
 import { 
   doc, 
@@ -25,7 +26,8 @@ import {
   query, 
   where, 
   onSnapshot,
-  addDoc
+  addDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
@@ -49,7 +51,7 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
   }[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState('');
   const { user } = useAuth();
-  const { state, startNewSimulation, updateState } = useSimulation();
+  const { state, localSims, startNewSimulation, addLocalSimulation, updateState } = useSimulation();
 
   useEffect(() => {
     if (!user) return;
@@ -66,6 +68,12 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
 
     return unsubscribe;
   }, [user]);
+
+  // Combine Cloud and Local simulations, removing duplicates by ID
+  const allSims = [
+    ...userSims,
+    ...localSims.filter(ls => !userSims.some(cs => cs.id === ls.id))
+  ].sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
 
   const handleWizardStep = async (userAnswer?: string) => {
     if (!idea.trim() && chatHistory.length === 0) return;
@@ -90,7 +98,7 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
         throw new Error('Groq API Key is missing.');
       }
 
-      const conversationContext = updatedHistory.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\\n');
+      const conversationContext = updatedHistory.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n');
 
       const basePrompt = `
         You are a social entrepreneurship expert. The output MUST be valid JSON.
@@ -152,8 +160,7 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
 
       const data = await response.json();
       const textResponse = data.choices[0]?.message?.content || '{}';
-      const cleanText = textResponse.replace(/^```json/mi, '').replace(/```$/m, '').trim();
-      const result = JSON.parse(cleanText);
+      const result = cleanJsonParse(textResponse);
 
       if (result.type === 'question') {
         setChatHistory(prev => [
@@ -188,38 +195,68 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
   };
 
   const saveSimulation = async () => {
-    if (!aiResponse || !user) return;
+    if (!aiResponse || !user) {
+      toast.error('Missing simulation data or user session.');
+      return;
+    }
     setIsGenerating(true);
     try {
-      const docRef = await addDoc(collection(db, 'simulations'), {
-        ...aiResponse,
+      const simData = {
+        title: aiResponse.title || 'Untitled Mission',
+        description: aiResponse.description || 'No description available',
+        category: aiResponse.category || 'General',
+        difficulty: aiResponse.difficulty || 1,
+        impactPotential: aiResponse.impactPotential || 5,
+        timeEstimate: aiResponse.timeEstimate || '20 Mins',
         status: 'Running',
         progress: 0,
         authorUid: user.uid,
         updatedAt: serverTimestamp(),
-        image: `https://picsum.photos/seed/${aiResponse.image || 'impact'}/800/400`
-      });
-
-      await startNewSimulation({
-        id: docRef.id,
-        name: aiResponse.title,
-        region: aiResponse.category,
+        image: `https://picsum.photos/seed/${aiResponse.image || 'impact'}/800/400`,
         pitch: idea,
         location: aiResponse.location || '',
-        stage: aiResponse.stage || 'Idea Stage',
+        stage: aiResponse.stage || 'Idea Stage'
+      };
+
+      // 1. Attempt to save to the cloud "Portfolio"
+      let docId = `temp-${Date.now()}`;
+      try {
+        const docRef = await addDoc(collection(db, 'simulations'), simData);
+        docId = docRef.id;
+      } catch (cloudErr) {
+        console.warn('Cloud Portfolio Save Failed (Permissions?):', cloudErr);
+        toast.warning('Cloud Sync Unavailable. Starting Local Session.');
+        
+        // Replace Firestore serverTimestamp with a real date for local storage
+        const localSimData = { 
+          ...simData, 
+          id: docId, 
+          updatedAt: new Date().toISOString() 
+        };
+        addLocalSimulation(localSimData);
+      }
+
+      // 2. Set as the "Active" simulation in the Workspace (Even if cloud fails)
+      await startNewSimulation({
+        id: docId,
+        name: simData.title,
+        region: simData.category,
+        pitch: simData.pitch,
+        location: simData.location,
+        stage: simData.stage
       });
 
-      toast.success('Simulation saved and started!');
+      toast.success('Simulation Started!');
       setIsModalOpen(false);
       setIdea('');
       setAiResponse(null);
       setChatHistory([]);
       
-      // Delay tab switch slightly to ensure state is committed
-      setTimeout(() => setActiveTab('workspace'), 100);
-    } catch (error) {
-      console.error('Save error:', error);
-      toast.error('Failed to save simulation.');
+      // Navigate to workspace
+      setActiveTab('workspace');
+    } catch (error: any) {
+      console.error('Critical Workspace Error:', error);
+      toast.error(`Critical Error: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -260,7 +297,7 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
           <Loader2 className="w-12 h-12 text-primary animate-spin" />
           <p className="text-slate-400 font-medium">Loading your simulations...</p>
         </div>
-      ) : userSims.length === 0 ? (
+      ) : allSims.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-32 bg-white/50 border-2 border-dashed border-slate-200 rounded-[3rem] text-center">
           <div className="w-20 h-20 bg-slate-100 rounded-3xl flex items-center justify-center text-slate-300 mb-6">
             <Zap size={40} />
@@ -277,7 +314,7 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {userSims.map((sim) => (
+          {allSims.map((sim) => (
             <article key={sim.id} className="group relative bg-white rounded-3xl overflow-hidden hover:translate-y-[-4px] transition-all duration-300 border border-slate-100 shadow-sm hover:shadow-xl">
               <div className="relative h-56 overflow-hidden">
                 <img 
@@ -287,8 +324,26 @@ export function SimulationHub({ setActiveTab }: { setActiveTab: (tab: string) =>
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                <div className="absolute top-4 right-4 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold uppercase tracking-wider">
-                  {sim.category}
+                <div className="absolute top-4 right-4 flex gap-2">
+                  <div className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold uppercase tracking-wider">
+                    {sim.category}
+                  </div>
+                  <button 
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (confirm('Are you sure you want to delete this simulation?')) {
+                        try {
+                          await deleteDoc(doc(db, 'simulations', sim.id));
+                          toast.success('Simulation deleted');
+                        } catch (err) {
+                          toast.error('Failed to delete');
+                        }
+                      }
+                    }}
+                    className="p-1.5 bg-red-500/80 hover:bg-red-600 text-white rounded-full backdrop-blur-sm transition-colors"
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
               </div>
               <div className="p-8">

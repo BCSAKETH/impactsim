@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
 import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { toast } from 'sonner';
 
 export interface ChallengeOption {
   text: string;
@@ -46,6 +47,7 @@ export interface SimulationState {
   location?: string;
   stage?: string;
   currentChallenge?: Challenge;
+  turnCount: number;
   decisions: DecisionHistory[];
   gameLanguage?: string;
   resourceAllocation: {
@@ -72,59 +74,89 @@ export interface SimulationState {
 
 export interface SimulationContextType {
   state: SimulationState;
+  localSims: any[];
   updateState: (updates: Partial<SimulationState>) => Promise<void>;
   startNewSimulation: (scenario: { id: string; name: string; region: string; pitch?: string; location?: string; stage?: string }) => Promise<void>;
+  addLocalSimulation: (sim: any) => void;
   resetSimulation: () => Promise<void>;
   undoDecision: () => Promise<void>;
 }
 
 const initialState: SimulationState = {
-  impactScore: 84,
-  timeElapsed: 14,
-  socialImpact: 62,
-  budget: 12450,
-  trust: 41,
-  momentum: 50,
+  impactScore: 0,
+  timeElapsed: 0,
+  socialImpact: 0,
+  budget: 0,
+  trust: 0,
+  momentum: 0,
   currentPhase: 'discovery',
-  scenarioId: 'RURAL-MH-042',
-  scenarioName: 'Mental Health Outreach',
-  region: 'Central Appalachian Region',
+  scenarioId: '',
+  scenarioName: '',
+  region: '',
   status: 'idle',
+  turnCount: 0,
   decisions: [],
   gameLanguage: 'English',
   resourceAllocation: {
-    staff: 45,
-    tech: 25,
-    marketing: 30
+    staff: 0,
+    tech: 0,
+    marketing: 0
   },
   stakeholderFeedback: [],
-  notifications: [{
-    id: 'welcome',
-    title: 'Simulation Started',
-    message: 'Welcome to your social entrepreneurship environment.',
-    time: 'Just now',
-    read: false,
-    type: 'info'
-  }]
+  notifications: []
 };
 
 const SimulationContext = createContext<SimulationContextType | undefined>(undefined);
 
 export function SimulationProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<SimulationState>(initialState);
+  const [localSims, setLocalSims] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 1. Initial State Hydration from LocalStorage
+    const local = localStorage.getItem('yukti_sim_state');
+    if (local) {
+      try {
+        const parsed = JSON.parse(local);
+        if (parsed.status === 'active') {
+          setState(parsed);
+        }
+      } catch (e) {
+        console.error('Failed to parse local state');
+      }
+    }
+
+    // 2. Local Portfolio Hydration
+    const storedSims = localStorage.getItem('yukti_local_portfolio');
+    if (storedSims) {
+      try {
+        setLocalSims(JSON.parse(storedSims));
+      } catch (e) {
+        console.error('Failed to parse local portfolio');
+      }
+    }
+
     if (!auth.currentUser) {
       setLoading(false);
       return;
     }
 
+    // 3. Cloud State Sync via Snapshot
     const unsub = onSnapshot(doc(db, 'users', auth.currentUser.uid, 'simulations', 'active'), (snapshot) => {
       if (snapshot.exists()) {
-        setState(snapshot.data() as SimulationState);
+        const cloudState = snapshot.data() as SimulationState;
+        setState(cloudState);
+        localStorage.setItem('yukti_sim_state', JSON.stringify(cloudState));
       } else {
-        setState(initialState);
+        // Only reset if we aren't currently in an active local session
+        // This prevents flickering/reset when permissions are missing
+        setState(prev => {
+          if (prev.status === 'active' && prev.scenarioId.startsWith('temp-')) {
+            return prev; // Keep the local session
+          }
+          return initialState;
+        });
       }
       setLoading(false);
     }, (error) => {
@@ -136,7 +168,9 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('yukti_sim_state', JSON.stringify(state));
+    if (state.status === 'active') {
+       localStorage.setItem('yukti_sim_state', JSON.stringify(state));
+    }
   }, [state]);
 
   const updateState = async (updates: Partial<SimulationState>) => {
@@ -159,6 +193,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
       region: scenario.region,
       status: 'active',
       timeElapsed: 0,
+      turnCount: 0,
       impactScore: 50,
       socialImpact: 50,
       budget: 50000,
@@ -172,8 +207,23 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
       decisions: [],
       currentChallenge: undefined,
     };
+    
+    // Update local state first for immediate UI response
     setState(newState);
-    await setDoc(doc(db, 'users', auth.currentUser.uid, 'simulations', 'active'), newState);
+    
+    try {
+      await setDoc(doc(db, 'users', auth.currentUser.uid, 'simulations', 'active'), newState);
+    } catch (error) {
+      console.error('Failed to save active simulation:', error);
+      toast.error('Simulation started locally, but cloud sync failed.');
+    }
+  };
+
+  const addLocalSimulation = (sim: any) => {
+    const newSim = { ...sim, createdAt: new Date().toISOString() };
+    const updated = [newSim, ...localSims];
+    setLocalSims(updated);
+    localStorage.setItem('yukti_local_portfolio', JSON.stringify(updated));
   };
 
   const resetSimulation = async () => {
@@ -205,7 +255,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
   };
 
   return (
-    <SimulationContext.Provider value={{ state, updateState, startNewSimulation, resetSimulation, undoDecision }}>
+    <SimulationContext.Provider value={{ state, localSims, updateState, startNewSimulation, addLocalSimulation, resetSimulation, undoDecision }}>
       {!loading && children}
     </SimulationContext.Provider>
   );

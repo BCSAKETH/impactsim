@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Megaphone,
   Users,
@@ -31,7 +31,7 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FEEDBACK } from '../constants';
-import { cn } from '../lib/utils';
+import { cn, cleanJsonParse } from '../lib/utils';
 import { toast } from 'sonner';
 import { useSimulation, ChallengeOption } from '../context/SimulationContext';
 import { AcceleratorAnalysis } from './AcceleratorAnalysis';
@@ -42,7 +42,7 @@ export function ActiveWorkspace() {
   const { state, updateState, undoDecision } = useSimulation();
   const [isGenerating, setIsGenerating] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     // Kick off generation if we are in execution phase and don't have a challenge
     if (state.currentPhase === 'execution' && state.status === 'active' && !state.currentChallenge && !isGenerating) {
       generateNextChallenge(state.lastDecision);
@@ -71,6 +71,7 @@ export function ActiveWorkspace() {
           "title": "Short title",
           "description": "Detailed 2-3 sentence description of the dilemma.",
           "quote": "A quote from a stakeholder",
+          "visual_keyword": "A single descriptive word or short phrase for an image (e.g., 'solar-farm', 'clinic', 'crowd')",
           "stakeholder_reaction": { "name": "Someone", "role": "Their role", "message": "Reaction to previous dev" },
           "options": [
             { "text": "Option 1", "effect_trust": 5, "effect_impact": 10, "effect_budget": -5000, "effect_momentum": 5 },
@@ -97,8 +98,7 @@ export function ActiveWorkspace() {
 
       const data = await response.json();
       const textResponse = data.choices[0]?.message?.content || '{}';
-      const cleanText = textResponse.replace(/^```json/mi, '').replace(/```$/m, '').trim();
-      const newChallenge = JSON.parse(cleanText);
+      const newChallenge = cleanJsonParse(textResponse);
       
       const newFeedback = newChallenge.stakeholder_reaction;
       let updatedFeedback = state.stakeholderFeedback || [];
@@ -136,15 +136,19 @@ export function ActiveWorkspace() {
   const handleDecision = async (option: ChallengeOption) => {
     if (!state.currentChallenge) return;
     
-    // Safety check for effect_momentum if it's missing in AI response
-    const momentumChange = (option as any).effect_momentum || 0;
-
-    const newTrust = Math.min(100, Math.max(0, state.trust + option.effect_trust));
-    const newImpact = Math.min(100, Math.max(0, state.socialImpact + option.effect_impact));
-    const newBudget = Math.max(0, state.budget + option.effect_budget);
-    const newMomentum = Math.min(100, Math.max(0, state.momentum + momentumChange));
-    const newScore = Math.round((newTrust * 0.3) + (newImpact * 0.5) + (newMomentum * 0.2));
+    const newTurnCount = (state.turnCount || 0) + 1;
     
+    // Safety check for effect_momentum if it's missing in AI response
+    const momentumEffect = (option as any).effect_momentum || 0;
+
+    const newState = {
+      budget: Math.max(0, state.budget + option.effect_budget),
+      socialImpact: Math.min(100, Math.max(0, state.socialImpact + option.effect_impact)),
+      trust: Math.min(100, Math.max(0, state.trust + option.effect_trust)),
+      momentum: Math.min(100, Math.max(0, state.momentum + momentumEffect)),
+      impactScore: Math.round(state.impactScore + (option.effect_impact * 2) + (option.effect_trust * 1.5)),
+      turnCount: newTurnCount,
+    };
     const historyItem = {
       id: Math.random().toString(36).substring(7),
       challenge: state.currentChallenge,
@@ -159,11 +163,7 @@ export function ActiveWorkspace() {
     };
     
     await updateState({
-      trust: newTrust,
-      socialImpact: newImpact,
-      budget: newBudget,
-      momentum: newMomentum,
-      impactScore: newScore,
+      ...newState,
       timeElapsed: state.timeElapsed + 1,
       lastDecision: option.text,
       decisions: [...(state.decisions || []), historyItem],
@@ -231,7 +231,7 @@ export function ActiveWorkspace() {
   ];
 
   return (
-    <div className="grid grid-cols-12 gap-8 min-h-[85vh]">
+    <div className="grid grid-cols-12 gap-8 items-start min-h-[85vh]">
       {/* LEFT NAV: THE TIMELINE */}
       <div className="col-span-12 lg:col-span-2 space-y-6">
         <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col h-full">
@@ -324,6 +324,29 @@ export function ActiveWorkspace() {
                exit={{ opacity: 0, y: -20 }}
                className="space-y-8"
             >
+              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between">
+                <div className="flex gap-4 items-center">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-black">
+                    {state.turnCount || 0}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-on-surface uppercase tracking-tight">
+                      {state.turnCount <= 4 ? "Milestone 1: Community Trust" : 
+                       state.turnCount <= 8 ? "Milestone 2: Operational Growth" : "Milestone 3: Global Scale"}
+                    </h4>
+                    <p className="text-[10px] items-center text-slate-400 font-bold uppercase tracking-widest">Targeting Stability</p>
+                  </div>
+                </div>
+                <div className="flex-1 max-w-[200px] ml-8">
+                   <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                     <div 
+                       className="h-full bg-primary transition-all duration-1000" 
+                       style={{ width: `${Math.min(100, ((state.turnCount || 0) % 4 || 4) / 4 * 100)}%` }} 
+                     />
+                   </div>
+                </div>
+              </div>
+
               <section className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 relative overflow-hidden group min-h-[500px] flex flex-col border-b-[8px] border-primary/20">
                 <div className="relative flex-1 flex flex-col">
                   <div className="flex items-center justify-between mb-8">
@@ -345,6 +368,14 @@ export function ActiveWorkspace() {
                     </div>
                   ) : (
                     <>
+                      <div className="relative h-48 -mx-10 -mt-10 mb-10 overflow-hidden border-b border-slate-100">
+                        <img 
+                          src={`https://picsum.photos/seed/${(state.currentChallenge as any)?.visual_keyword || 'impact'}/800/400`} 
+                          alt="Challenge" 
+                          className="w-full h-full object-cover opacity-80"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent" />
+                      </div>
                       <h3 className="text-4xl font-headline font-black text-on-surface mb-6 leading-tight">
                         {state.currentChallenge?.title || "Evaluating Environment..."}
                       </h3>
