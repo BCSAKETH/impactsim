@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - The unique ID of the user.
+    //   - displayName: string (optional) - The display name of the user.
+    //   - email: string (required) - The email of the user.
+    //   - photoURL: string (optional) - The photo URL of the user.
+    //   - role: string (required, enum: ['admin', 'user']) - The role of the user.
+    //
+    // Collection: simulations
+    // Document ID: {simId}
+    // Fields:
+    //   - id: string (required)
+    //   - title: string (required)
+    //   - status: string (optional, enum: ['Running', 'Review Required', 'Paused', 'Completed'])
+    //   - progress: number (optional)
+    //   - authorUid: string (required)
+    //   - updatedAt: timestamp (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.authorUid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "sakethananya123@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasOnly(['uid', 'displayName', 'email', 'photoURL', 'role']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['admin', 'user'];
+    }
+
+    function isValidSimulation(data) {
+      return data.keys().hasAll(['id', 'title', 'authorUid']) &&
+             data.keys().hasOnly(['id', 'title', 'status', 'progress', 'authorUid', 'updatedAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.authorUid is string && data.authorUid == request.auth.uid &&
+             (data.status in ['Running', 'Review Required', 'Paused', 'Completed']) &&
+             (data.progress is number && data.progress >= 0 && data.progress <= 100);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /simulations/{simId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidSimulation(request.resource.data);
+      allow update: if isAuthenticated() && isValidSimulation(request.resource.data) && (isDocOwner() || isAdmin()) && request.resource.data.authorUid == resource.data.authorUid;
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+  }
+}

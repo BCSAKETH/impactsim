@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --font-headline: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-primary: #005050;
+  --color-primary-container: #006a6a;
+  --color-secondary: #3a5f94;
+  --color-surface: #f8f9fa;
+  --color-on-surface: #191c1d;
+  --color-on-surface-variant: #3e4948;
+  --color-outline: #6e7979;
+  --color-outline-variant: #bec9c8;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-on-surface font-body;
+  }
+}
+
+.signature-gradient {
+  background: linear-gradient(135deg, #005050 0%, #006a6a 100%);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+}
