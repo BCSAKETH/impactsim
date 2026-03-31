@@ -48,6 +48,7 @@ export interface SimulationState {
   stage?: string;
   currentChallenge?: Challenge;
   turnCount: number;
+  currentMilestoneIndex: number;
   decisions: DecisionHistory[];
   gameLanguage?: string;
   resourceAllocation: {
@@ -70,6 +71,8 @@ export interface SimulationState {
     read: boolean;
     type: 'success' | 'warning' | 'info' | 'error';
   }[];
+  draftIdea?: string;
+  searchQuery: string;
 }
 
 export interface SimulationContextType {
@@ -80,6 +83,7 @@ export interface SimulationContextType {
   addLocalSimulation: (sim: any) => void;
   resetSimulation: () => Promise<void>;
   undoDecision: () => Promise<void>;
+  setSearchQuery: (query: string) => void;
 }
 
 const initialState: SimulationState = {
@@ -95,6 +99,7 @@ const initialState: SimulationState = {
   region: '',
   status: 'idle',
   turnCount: 0,
+  currentMilestoneIndex: 0,
   decisions: [],
   gameLanguage: 'English',
   resourceAllocation: {
@@ -103,7 +108,9 @@ const initialState: SimulationState = {
     marketing: 0
   },
   stakeholderFeedback: [],
-  notifications: []
+  notifications: [],
+  draftIdea: '',
+  searchQuery: '',
 };
 
 const SimulationContext = createContext<SimulationContextType | undefined>(undefined);
@@ -254,8 +261,12 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     await setDoc(doc(db, 'users', auth.currentUser.uid, 'simulations', 'active'), newState);
   };
 
+  const setSearchQuery = (query: string) => {
+    setState(prev => ({ ...prev, searchQuery: query }));
+  };
+
   return (
-    <SimulationContext.Provider value={{ state, localSims, updateState, startNewSimulation, addLocalSimulation, resetSimulation, undoDecision }}>
+    <SimulationContext.Provider value={{ state, localSims, updateState, startNewSimulation, addLocalSimulation, resetSimulation, undoDecision, setSearchQuery }}>
       {!loading && children}
     </SimulationContext.Provider>
   );

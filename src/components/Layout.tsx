@@ -8,28 +8,34 @@ import {
   Network, 
   Wrench, 
   Wallet, 
-  BarChart3, 
-  Settings, 
-  Bell,
-  Search,
-  ChevronRight,
-  Play,
-  ArrowRight,
-  TrendingUp,
-  Users,
-  Heart,
-  Info,
-  Send,
-  Plus,
-  Star,
-  Zap,
-  Download,
-  RefreshCcw,
+  Radio,
+  Clock,
   AlertTriangle,
-  MessageSquare,
-  MapPin,
   Leaf,
-  LogOut
+  Heart,
+  BarChart3,
+  MapPin,
+  Send,
+  MessageSquare,
+  TrendingUp,
+  Download,
+  Info,
+  ArrowDown,
+  Globe,
+  Calendar,
+  Filter,
+  Play,
+  Sparkles,
+  ArrowRight,
+  Plus,
+  Zap,
+  LayoutGrid,
+  Search,
+  Bell,
+  Settings,
+  LogOut,
+  ChevronRight,
+  BookOpen
 } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
@@ -46,8 +52,10 @@ interface SidebarProps {
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const { user } = useAuth();
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'dashboard', label: 'Overview', icon: LayoutGrid },
     { id: 'hub', label: 'Simulation Hub', icon: Network },
+    { id: 'lexicon', label: 'Founder Guide', icon: BookOpen },
+    { id: 'sprint', label: 'Impact Sprint', icon: Zap },
     { id: 'workspace', label: 'Active Workspace', icon: Wrench },
   ];
 
@@ -60,13 +68,13 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   };
 
   return (
-    <aside className="h-screen w-64 fixed left-0 top-0 bg-slate-100 flex flex-col py-10 px-6 z-50 border-r border-slate-200">
+    <aside className="h-screen w-64 fixed left-0 top-0 bg-slate-950 flex flex-col py-10 px-6 z-50 border-r border-slate-900">
       <div className="mb-12">
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-xl signature-gradient flex items-center justify-center text-white">
+          <div className="w-10 h-10 rounded-xl signature-gradient flex items-center justify-center text-white shadow-lg shadow-primary/20">
             <Zap size={24} fill="currentColor" />
           </div>
-          <span className="font-headline font-black text-teal-900 text-2xl tracking-tighter">Yukti</span>
+          <span className="font-headline font-black text-white text-2xl tracking-tighter">Yukti</span>
         </div>
         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Master the Art of Execution</p>
       </div>
@@ -77,20 +85,20 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             key={item.id}
             onClick={() => setActiveTab(item.id)}
             className={cn(
-              "w-full flex items-center gap-4 py-3 px-4 rounded-xl transition-all duration-200 font-headline",
+              "w-full flex items-center gap-4 py-3.5 px-4 rounded-xl transition-all duration-300 font-headline group",
               activeTab === item.id 
-                ? "text-teal-900 font-bold border-r-4 border-teal-900 bg-white/50" 
-                : "text-slate-600 hover:text-teal-800 hover:bg-white/30"
+                ? "text-primary font-bold bg-primary/10 border-r-4 border-primary" 
+                : "text-slate-400 hover:text-white hover:bg-white/5"
             )}
           >
-            <item.icon size={20} />
-            <span className="text-lg">{item.label}</span>
+            <item.icon size={20} className={cn("transition-colors", activeTab === item.id ? "text-primary" : "text-slate-500 group-hover:text-primary")} />
+            <span className="text-base">{item.label}</span>
           </button>
         ))}
       </nav>
 
       <div className="mt-auto pt-10">
-        <div className="p-4 rounded-2xl bg-slate-200/50 flex items-center gap-3 relative group">
+        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-3 relative group">
           <img 
             src={user?.photoURL || "https://i.pravatar.cc/150?u=alex"} 
             alt={user?.displayName || "User"} 
@@ -98,12 +106,12 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             referrerPolicy="no-referrer"
           />
           <div className="overflow-hidden flex-1">
-            <p className="font-bold text-sm text-on-surface truncate">{user?.displayName || "Architect"}</p>
-            <p className="text-xs text-on-surface-variant truncate">{user?.email}</p>
+            <p className="font-bold text-sm text-white truncate">{user?.displayName || "Architect"}</p>
+            <p className="text-[10px] text-slate-500 truncate uppercase font-black">{user?.email}</p>
           </div>
           <button 
             onClick={handleLogout}
-            className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+            className="p-2 text-slate-600 hover:text-red-500 transition-colors"
             title="Sign Out"
           >
             <LogOut size={16} />
@@ -116,7 +124,6 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
 
 export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActiveTab: (tab: string) => void }) {
   const { user } = useAuth();
-  const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [userSims, setUserSims] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -125,7 +132,8 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
   const searchRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
-  const { state, updateState, startNewSimulation } = useSimulation();
+  const { state, updateState, startNewSimulation, setSearchQuery } = useSimulation();
+  const searchQuery = state.searchQuery || '';
 
   const notifications = state.notifications || [];
 
@@ -155,8 +163,8 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
   useEffect(() => {
     if (searchQuery.trim().length > 1) {
       const filtered = userSims.filter(sim => 
-        sim.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sim.description.toLowerCase().includes(searchQuery.toLowerCase())
+        (sim.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        sim.description?.toLowerCase().includes(searchQuery.toLowerCase()))
       );
       setResults(filtered);
       setIsSearching(true);
@@ -190,26 +198,26 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <header className="fixed top-0 right-0 w-[calc(100%-16rem)] z-40 bg-slate-50/80 backdrop-blur-md h-20 px-10 flex justify-between items-center border-b border-slate-200">
+    <header className="fixed top-0 right-0 w-[calc(100%-16rem)] z-40 bg-slate-950/80 backdrop-blur-md h-20 px-10 flex justify-between items-center border-b border-slate-900">
       <div className="relative" ref={searchRef}>
-        <div className="flex items-center gap-4 bg-slate-200/50 px-4 py-2 rounded-full w-96">
-          <Search size={18} className="text-outline" />
+        <div className="flex items-center gap-4 bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-2xl w-[450px] transition-all focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10">
+          <Search size={18} className="text-slate-500" />
           <input 
             type="text" 
-            placeholder="Search simulations..." 
+            placeholder="Search simulations, terms, or labs..." 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onFocus={() => searchQuery.trim().length > 1 && setIsSearching(true)}
-            className="bg-transparent border-none focus:ring-0 text-sm w-full font-body outline-none"
+            className="bg-transparent border-none focus:ring-0 text-sm w-full font-body outline-none text-white placeholder:text-slate-600"
           />
         </div>
 
         {/* Search Results Dropdown */}
         {isSearching && (
-          <div className="absolute top-full left-0 w-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
-            <div className="p-4 border-b border-slate-50">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                {results.length} Results Found
+          <div className="absolute top-full left-0 w-full mt-2 bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden z-50">
+            <div className="p-4 border-b border-slate-800">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                {results.length} Simulations Found
               </p>
             </div>
             <div className="max-h-96 overflow-y-auto">
@@ -217,7 +225,7 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
                 results.map((sim) => (
                   <button
                     key={sim.id}
-                    className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 transition-colors text-left group"
+                    className="w-full flex items-center gap-4 p-4 hover:bg-white/5 transition-colors text-left group border-b border-slate-800/50 last:border-0"
                     onClick={async () => {
                       await startNewSimulation({
                         id: sim.id,
@@ -230,14 +238,14 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
                       toast.success(`Resumed: ${sim.title}`);
                     }}
                   >
-                    <div className="w-12 h-12 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0">
+                    <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-800 flex-shrink-0 border border-slate-700">
                       <img src={sim.image} alt={sim.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="font-headline font-bold text-teal-900 truncate group-hover:text-primary transition-colors">{sim.title}</h4>
+                      <h4 className="font-headline font-bold text-white truncate group-hover:text-primary transition-colors">{sim.title}</h4>
                       <p className="text-xs text-slate-500 truncate">{sim.description}</p>
                     </div>
-                    <ChevronRight size={16} className="text-slate-300 group-hover:text-primary transition-all" />
+                    <ChevronRight size={16} className="text-slate-600 group-hover:text-primary transition-all" />
                   </button>
                 ))
               ) : (
@@ -255,7 +263,7 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
         <div className="relative" ref={notifRef}>
           <button 
             onClick={() => { setShowNotifications(!showNotifications); setShowSettings(false); }}
-            className="text-slate-600 hover:text-teal-700 transition-colors relative"
+            className="text-slate-400 hover:text-primary transition-colors relative p-2 bg-slate-900 rounded-xl border border-slate-800"
           >
             <Bell size={20} />
             {unreadCount > 0 && (
@@ -264,9 +272,9 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
           </button>
 
           {showNotifications && (
-            <div className="absolute top-full right-0 mt-3 w-96 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
-              <div className="p-5 border-b border-slate-100 flex justify-between items-center">
-                <h4 className="font-headline font-bold text-on-surface">Notifications</h4>
+            <div className="absolute top-full right-0 mt-3 w-96 bg-slate-950 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden z-50">
+              <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                <h4 className="font-headline font-bold text-white">Notifications</h4>
                 <button onClick={markAllRead} className="text-xs font-bold text-primary hover:underline">Mark all read</button>
               </div>
               <div className="max-h-96 overflow-y-auto divide-y divide-slate-50">
@@ -307,15 +315,15 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
         <div className="relative" ref={settingsRef}>
           <button 
             onClick={() => { setShowSettings(!showSettings); setShowNotifications(false); }}
-            className="text-slate-600 hover:text-teal-700 transition-colors"
+            className="text-slate-400 hover:text-primary transition-colors p-2 bg-slate-900 rounded-xl border border-slate-800"
           >
             <Settings size={20} />
           </button>
 
           {showSettings && (
-            <div className="absolute top-full right-0 mt-3 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
-              <div className="p-5 border-b border-slate-100">
-                <h4 className="font-headline font-bold text-on-surface">Settings</h4>
+            <div className="absolute top-full right-0 mt-3 w-80 bg-slate-950 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden z-50">
+              <div className="p-5 border-b border-slate-800">
+                <h4 className="font-headline font-bold text-white">Settings</h4>
                 <p className="text-xs text-slate-400 mt-1">Configure your preferences</p>
               </div>
               <div className="p-4 space-y-5">
@@ -413,12 +421,13 @@ export function TopBar({ activeTab, setActiveTab }: { activeTab: string; setActi
           )}
         </div>
 
-        <div className="h-8 w-[1px] bg-slate-200 mx-2"></div>
+        <div className="h-8 w-[1px] bg-slate-800 mx-2"></div>
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-teal-900 line-clamp-1">
-            Impact Score: <span className="font-bold">{(state.impactScore || 0).toLocaleString()}</span>
-          </span>
-          <div className="w-8 h-8 rounded-lg bg-teal-100 flex items-center justify-center text-teal-900 font-bold text-xs shrink-0">{initials}</div>
+          <div className="text-right hidden sm:block">
+             <p className="text-xs font-bold text-white">{user?.displayName || "Architect"}</p>
+             <p className="text-[10px] font-black text-primary uppercase tracking-widest leading-none mt-0.5">Level {(Math.floor(state.impactScore / 1000) + 1)}</p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-primary font-black text-sm shadow-xl">{initials}</div>
         </div>
       </div>
     </header>

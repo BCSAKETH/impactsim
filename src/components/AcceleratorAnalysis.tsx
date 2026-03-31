@@ -22,7 +22,7 @@ import {
   BarChart3,
   Layers
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { useSimulation } from '../context/SimulationContext';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
@@ -69,7 +69,11 @@ interface AnalysisResult {
   overallReadiness: number;
   bestAccelerator: string;
   bestGovernmentScheme: string;
-  summary: string;
+  summary: string | {
+    pitch: string;
+    keyChallenge: string;
+    recommendedNextSteps: string;
+  };
 }
 
 export function AcceleratorAnalysis() {
@@ -111,25 +115,20 @@ You are a world-class startup advisor and policy analyst. Analyze the following 
 **Stage:** "${state.stage || 'Idea Stage'}"
 **Category:** "${state.region || 'General'}"
 
-Provide a DETAILED analysis with the following:
+Provide a VERY DETAILED analysis with the following:
 
-1. **Accelerator Matches**: Compare this idea with 4-5 real startups from Y Combinator and Techstars that are in similar domains. For each match, provide the startup name, which program (YC or Techstars), similarity score (0-100), their stage, location, funding raised, and their key strength that makes them comparable.
+1. **Accelerator Matches**: Find 4-5 REAL, well-known startups from Y Combinator and Techstars (include the actual startup names) that operate in a similar field. Provide their similarity score, stage, location, and key strength.
 
-2. **Gap Analysis**: Identify 4-5 specific areas where this pitch is lacking compared to top accelerator-backed startups. For each gap, specify the area (e.g., "Revenue Model", "Technical Moat", "Market Validation"), severity ("critical", "moderate", "minor"), a detailed description of what's missing, and a concrete recommendation to fix it.
+2. **Gap Analysis**: identify 4-5 CRITICAL gaps compared to these top-tier companies. Be specific about technical, market, or operational weaknesses.
 
-3. **Optimal Schemas**: Suggest 3-4 operational/business model schemas that would be optimal for this specific stage and location. For each schema, provide the name, description, fit score (0-100), and reason why it fits.
+3. **Optimal Schemas**: Propose 3-4 specialized business or impact models (e.g., 'B-Corp', 'Direct-to-Consumer Social Model', 'Hybrid-Non-Profit') specifically for this location and stage.
 
-4. **Government Schemes**: Find 4-6 REAL, specific government grants, subsidies, schemes, or programs that are relevant to this project based on its location and category. For each scheme, provide the exact name, the issuing government agency, a description, eligibility criteria, approximate funding Amount, and a URL or note about where to apply. Focus on schemes from the project's location/country. If the location is in India, include schemes like Startup India, MUDRA, ATAL Innovation Mission, etc. If in the US, include SBIR, SBA grants, etc.
+4. **Government Schemes**: Focus EXCLUSIVELY on government grants, subsidies, and schemes that exist in the specified location (${state.location}). If location is India, find 4-6 schemes like Startup India, MUDRA, or ATAL. If the location is global or unspecified, search for major international development grants.
 
-5. **Overall Readiness Score**: A number from 0-100 representing how ready this idea is for accelerator application.
-
-6. **Best Accelerator**: Name the single best-fit accelerator program for this idea.
-
-7. **Best Government Scheme**: Name the single best-fit government scheme for this idea.
-
-8. **Summary**: A 2-3 sentence executive summary of the analysis.
-
-Be specific, realistic, and actionable. Use real accelerator startup names and real government schemes.
+5. **Overall Readiness Score**: (0-100).
+6. **Best Accelerator**: Single best fit.
+7. **Best Government Scheme**: Single best fit.
+8. **Summary**: A premium 3-4 sentence "Executive Masterclass" summary.
       `;
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -272,29 +271,47 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
       {/* Pitch Context Card */}
       <section className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm">
         <h3 className="font-headline font-bold text-lg mb-6 flex items-center gap-3">
-          <Target className="text-violet-500" size={22} />
-          Your Venture Profile
+          <Sparkles className="text-violet-500" size={22} />
+          Venture Blueprint Details
         </h3>
         {hasPitch ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-2 bg-slate-50 p-6 rounded-2xl">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Pitch</p>
-              <p className="text-on-surface leading-relaxed">{state.pitch}</p>
+            <div className="md:col-span-2 bg-slate-50 p-6 rounded-2xl border-2 border-slate-100">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Active Pitch</p>
+              <textarea 
+                className="w-full bg-transparent text-on-surface leading-relaxed font-bold resize-none h-24 focus:outline-none"
+                value={state.pitch}
+                onChange={(e) => updateState({ pitch: e.target.value })}
+              />
             </div>
             <div className="space-y-4">
-              <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 rounded-2xl border border-violet-100">
-                <p className="text-[10px] font-bold text-violet-400 uppercase tracking-widest mb-1">Location</p>
-                <p className="font-headline font-bold text-violet-900 flex items-center gap-2">
-                  <MapPin size={16} />
-                  {state.location || 'Not specified'}
-                </p>
+              <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 p-5 rounded-2xl border-2 border-violet-100">
+                <p className="text-[10px] font-black text-violet-400 uppercase tracking-[0.2em] mb-3">Target Location</p>
+                <div className="relative">
+                  <MapPin className="absolute left-0 top-1/2 -translate-y-1/2 text-violet-400 pointer-events-none" size={16} />
+                  <input 
+                    className="w-full bg-transparent font-headline font-black text-violet-900 pl-6 border-b border-violet-200 focus:border-violet-500 outline-none pb-1"
+                    value={state.location || ''}
+                    onChange={(e) => updateState({ location: e.target.value })}
+                    placeholder="Enter City/Country"
+                  />
+                </div>
               </div>
-              <div className="bg-gradient-to-br from-teal-50 to-emerald-50 p-5 rounded-2xl border border-teal-100">
-                <p className="text-[10px] font-bold text-teal-400 uppercase tracking-widest mb-1">Stage</p>
-                <p className="font-headline font-bold text-teal-900 flex items-center gap-2">
-                  <Layers size={16} />
-                  {state.stage || 'Idea Stage'}
-                </p>
+              <div className="bg-gradient-to-br from-teal-50 to-emerald-50 p-5 rounded-2xl border-2 border-teal-100">
+                <p className="text-[10px] font-black text-teal-400 uppercase tracking-[0.2em] mb-3">Venture Stage</p>
+                <div className="relative">
+                  <Layers className="absolute left-0 top-1/2 -translate-y-1/2 text-teal-400 pointer-events-none" size={16} />
+                  <select 
+                    className="w-full bg-transparent font-headline font-black text-teal-900 pl-6 border-b border-teal-200 focus:border-teal-500 outline-none pb-1 appearance-none cursor-pointer"
+                    value={state.stage || ''}
+                    onChange={(e) => updateState({ stage: e.target.value })}
+                  >
+                    <option value="Idea Stage">Idea Stage</option>
+                    <option value="Developing Prototype">Developing Prototype</option>
+                    <option value="Developed/Pre-Revenue">Developed/Pre-Revenue</option>
+                    <option value="Complete/Generating Revenue">Complete/Generating Revenue</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>
@@ -389,24 +406,53 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
               </div>
             </div>
             <div className="col-span-12 lg:col-span-8">
-              <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-8 text-white h-full shadow-xl">
-                <h3 className="font-headline font-bold text-2xl mb-4 flex items-center gap-3">
-                  <Sparkles className="text-violet-400" size={24} />
-                  Executive Summary
+              <div className="bg-slate-900 rounded-[2.5rem] p-10 text-white h-full shadow-2xl relative overflow-hidden border-t-4 border-violet-500">
+                <div className="absolute top-0 right-0 p-8 opacity-10">
+                  <Sparkles size={120} />
+                </div>
+                <h3 className="font-headline font-black text-3xl mb-6 flex items-center gap-3 italic tracking-tight">
+                  <div className="p-2 bg-violet-500 rounded-lg">
+                    <Sparkles className="text-white" size={20} />
+                  </div>
+                  Executive Intelligence Summary
                 </h3>
-                <p className="text-slate-300 text-lg leading-relaxed mb-8">{result.summary}</p>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-white/5 backdrop-blur p-4 rounded-2xl border border-white/10">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase mb-1">YC/Techstars Matches</p>
-                    <p className="text-2xl font-headline font-bold text-violet-400">{result.acceleratorMatches.length}</p>
+                <div className="text-slate-300 text-lg leading-relaxed mb-10 font-medium italic">
+                  {typeof result.summary === 'string' ? (
+                    `"${result.summary}"`
+                  ) : (
+                    <div className="space-y-4 not-italic">
+                      <div>
+                        <span className="text-violet-400 font-black uppercase text-[10px] tracking-widest block mb-1">The Pitch</span>
+                        <p className="text-white text-xl">"{String(result.summary?.pitch)}"</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-6">
+                        <div>
+                          <span className="text-fuchsia-400 font-black uppercase text-[10px] tracking-widest block mb-1">Key Challenge</span>
+                          <p className="text-sm font-bold text-slate-200">{String(result.summary?.keyChallenge)}</p>
+                        </div>
+                        <div>
+                          <span className="text-emerald-400 font-black uppercase text-[10px] tracking-widest block mb-1">Next Steps</span>
+                          <p className="text-sm font-bold text-slate-200">{String(result.summary?.recommendedNextSteps)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-6">
+                  <div className="bg-white/5 backdrop-blur p-5 rounded-[2rem] border border-white/10 hover:bg-white/10 transition-all">
+                    <p className="text-violet-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Simulated Matches</p>
+                    <p className="text-2xl font-black">{result.acceleratorMatches.length}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">YC/Techstars Network</p>
                   </div>
-                  <div className="bg-white/5 backdrop-blur p-4 rounded-2xl border border-white/10">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase mb-1">Identified Gaps</p>
-                    <p className="text-2xl font-headline font-bold text-amber-400">{result.gapAnalysis.length}</p>
+                  <div className="bg-white/5 backdrop-blur p-5 rounded-[2rem] border border-white/10 hover:bg-white/10 transition-all">
+                    <p className="text-fuchsia-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Gaps Identified</p>
+                    <p className="text-2xl font-black">{result.gapAnalysis.length}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">Strategic Hurdles</p>
                   </div>
-                  <div className="bg-white/5 backdrop-blur p-4 rounded-2xl border border-white/10">
-                    <p className="text-slate-400 text-[10px] font-bold uppercase mb-1">Govt Schemes</p>
-                    <p className="text-2xl font-headline font-bold text-emerald-400">{result.governmentSchemes.length}</p>
+                  <div className="bg-white/5 backdrop-blur p-5 rounded-[2rem] border border-white/10 hover:bg-white/10 transition-all">
+                    <p className="text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Relevant Schemes</p>
+                    <p className="text-2xl font-black">{result.governmentSchemes.length}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">Localized Policies</p>
                   </div>
                 </div>
               </div>
@@ -449,7 +495,7 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
                       >
                         <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-100 to-fuchsia-100 flex items-center justify-center flex-shrink-0">
                           <span className="font-headline font-black text-violet-600 text-lg">
-                            {match.program === 'YC' || match.program.includes('Y Combinator') ? 'YC' : 'TS'}
+                            {(match.program === 'YC' || match.program?.includes('Y Combinator')) ? 'YC' : 'TS'}
                           </span>
                         </div>
                         <div className="flex-1 min-w-0">
@@ -459,11 +505,11 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
                               {match.program}
                             </span>
                           </div>
-                          <p className="text-xs text-on-surface-variant truncate">{match.keyStrength}</p>
+                          <p className="text-xs text-on-surface-variant truncate">{String(match.keyStrength)}</p>
                           <div className="flex items-center gap-4 mt-2 text-[11px] text-slate-500">
-                            <span className="flex items-center gap-1"><MapPin size={12} /> {match.location}</span>
-                            <span>{match.stage}</span>
-                            <span className="font-bold text-emerald-600">{match.fundingRaised}</span>
+                            <span className="flex items-center gap-1"><MapPin size={12} /> {String(match.location)}</span>
+                            <span>{String(match.stage)}</span>
+                            <span className="font-bold text-emerald-600">{String(match.fundingRaised)}</span>
                           </div>
                         </div>
                         <div className="text-right flex-shrink-0">
@@ -514,10 +560,10 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
                             {gap.severity}
                           </span>
                         </div>
-                        <p className="text-sm mb-3 opacity-80">{gap.description}</p>
+                        <p className="text-sm mb-3 opacity-80">{typeof gap.description === 'string' ? gap.description : JSON.stringify(gap.description)}</p>
                         <div className="flex items-start gap-2 bg-white/60 p-3 rounded-xl">
                           <ArrowRight size={14} className="mt-0.5 flex-shrink-0" />
-                          <p className="text-sm font-medium">{gap.recommendation}</p>
+                          <p className="text-sm font-medium">{typeof gap.recommendation === 'string' ? gap.recommendation : JSON.stringify(gap.recommendation)}</p>
                         </div>
                       </div>
                     ))}
@@ -564,8 +610,8 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
                             Best Fit
                           </div>
                         )}
-                        <h4 className="font-headline font-bold text-teal-900 mb-2">{schema.name}</h4>
-                        <p className="text-sm text-teal-700 opacity-80 mb-4">{schema.description}</p>
+                        <h4 className="font-headline font-bold text-teal-900 mb-2">{String(schema.name)}</h4>
+                        <p className="text-sm text-teal-700 opacity-80 mb-4">{String(schema.description)}</p>
                         <div className="flex items-center justify-between">
                           <div className="h-2 flex-1 bg-teal-100 rounded-full overflow-hidden mr-4">
                             <div
@@ -575,7 +621,7 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
                           </div>
                           <span className="font-headline font-bold text-teal-700 text-sm">{schema.fit}%</span>
                         </div>
-                        <p className="text-xs text-teal-600 mt-3 italic">{schema.reason}</p>
+                        <p className="text-xs text-teal-600 mt-3 italic">{typeof schema.reason === 'string' ? schema.reason : JSON.stringify(schema.reason)}</p>
                       </div>
                     ))}
                   </div>
@@ -631,10 +677,10 @@ Be specific, realistic, and actionable. Use real accelerator startup names and r
                             {scheme.fundingAmount}
                           </span>
                         </div>
-                        <p className="text-sm text-blue-800/80 mb-3">{scheme.description}</p>
+                        <p className="text-sm text-blue-800/80 mb-3">{typeof scheme.description === 'string' ? scheme.description : JSON.stringify(scheme.description)}</p>
                         <div className="bg-white/60 p-3 rounded-xl mb-3">
                           <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">Eligibility</p>
-                          <p className="text-xs text-blue-700">{scheme.eligibility}</p>
+                          <p className="text-xs text-blue-700">{typeof scheme.eligibility === 'string' ? scheme.eligibility : JSON.stringify(scheme.eligibility)}</p>
                         </div>
                         {scheme.link && scheme.link !== 'N/A' && (
                           <a

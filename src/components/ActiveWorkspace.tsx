@@ -23,31 +23,41 @@ import {
   Sparkles,
   ArrowRight,
   Plus,
-  Zap
+  Zap,
+  RotateCcw,
+  Trophy,
+  CheckCircle,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar 
-} from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FEEDBACK } from '../constants';
 import { cn, cleanJsonParse } from '../lib/utils';
 import { toast } from 'sonner';
 import { useSimulation, ChallengeOption } from '../context/SimulationContext';
 import { AcceleratorAnalysis } from './AcceleratorAnalysis';
 
-const COLORS = ['#005050', '#3a5f94', '#006a6a', '#bec9c8'];
-
 export function ActiveWorkspace() {
   const { state, updateState, undoDecision } = useSimulation();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  const totalMilestones = 3;
+  const turnsPerMilestone = 4;
+  
+  const milestoneDetails = [
+    { name: "Strategic Foundation", Goal: "Community Trust & Validation" },
+    { name: "Operational Growth", Goal: "Process Efficiency & Scaling" },
+    { name: "Global Impact", Goal: "Sustainability & Ecosystem Influence" }
+  ];
+
+  const currentMilestone = milestoneDetails[state.currentMilestoneIndex] || milestoneDetails[0];
 
   useEffect(() => {
-    // Kick off generation if we are in execution phase and don't have a challenge
-    if (state.currentPhase === 'execution' && state.status === 'active' && !state.currentChallenge && !isGenerating) {
+    if (state.currentPhase === 'execution' && state.status === 'active' && !state.currentChallenge && !isGenerating && !showReport) {
       generateNextChallenge(state.lastDecision);
     }
-  }, [state.currentChallenge, state.status, state.currentPhase]);
+  }, [state.currentChallenge, state.status, state.currentPhase, showReport]);
 
   const generateNextChallenge = async (previousChoiceText?: string) => {
     setIsGenerating(true);
@@ -61,35 +71,35 @@ export function ActiveWorkspace() {
         You are the game master for a social entrepreneurship simulation. Provide the ENTIRE JSON response strictly.
         Project: ${state.scenarioName}
         Region: ${state.location || state.region}
-        Current Status - Trust: ${state.trust}%, Impact: ${state.socialImpact}%, Budget: $${state.budget.toLocaleString()}, Momentum: ${state.momentum}%
+        Language: ${state.gameLanguage || 'English'}
+        Current Status - Trust: ${state.trust}%, Impact: ${state.socialImpact}%, Budget: $${state.budget.toLocaleString()}
         
         ${isBankrupt ? 'CRITICAL: Out of funds! Focus on emergency measures.' : ''}
-        ${previousChoiceText ? `The user previously decided: "${previousChoiceText}".` : 'This is the start.'}
+        ${previousChoiceText ? `The user last decided: "${previousChoiceText}". Respond specifically to this.` : 'This is the start.'}
         
         Generate a new scenario JSON:
         {
           "title": "Short title",
-          "description": "Detailed 2-3 sentence description of the dilemma.",
+          "description": "Detailed 2-3 sentence description.",
           "quote": "A quote from a stakeholder",
-          "visual_keyword": "A single descriptive word or short phrase for an image (e.g., 'solar-farm', 'clinic', 'crowd')",
-          "stakeholder_reaction": { "name": "Someone", "role": "Their role", "message": "Reaction to previous dev" },
+          "visual_keyword": "object like 'water-tank'",
+          "stakeholder_reaction": { "name": "Name", "role": "Role", "message": "Reaction text" },
           "options": [
             { "text": "Option 1", "effect_trust": 5, "effect_impact": 10, "effect_budget": -5000, "effect_momentum": 5 },
-            ... (total 4 options)
+            { "text": "Option 2", "effect_trust": -2, "effect_impact": 15, "effect_budget": -12000, "effect_momentum": 8 },
+            { "text": "Option 3", "effect_trust": 10, "effect_impact": 5, "effect_budget": -2000, "effect_momentum": 2 },
+            { "text": "Option 4", "effect_trust": -8, "effect_impact": 2, "effect_budget": -0, "effect_momentum": 0 }
           ]
         }
       `;
       
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'llama-3.1-8b-instant',
           messages: [
-            { role: 'system', content: 'You are a social entrepreneurship expert. The output MUST be valid JSON.' },
+            { role: 'system', content: `Social Entrepreneurship Simulator. JSON ONLY. Language: ${state.gameLanguage || 'English'}` },
             { role: 'user', content: prompt }
           ],
           response_format: { type: 'json_object' }
@@ -115,19 +125,10 @@ export function ActiveWorkspace() {
 
       await updateState({ 
         currentChallenge: newChallenge,
-        stakeholderFeedback: updatedFeedback,
-        notifications: [{
-          id: Math.random().toString(36).substring(7),
-          title: 'Strategic Update',
-          message: 'The AI Consultant has analyzed the current landscape.',
-          time: 'Just now',
-          read: false,
-          type: 'success'
-        }, ...(state.notifications || [])]
+        stakeholderFeedback: updatedFeedback
       });
     } catch (e) {
-      console.error(e);
-      toast.error('Failed to generate next phase.');
+      toast.error('Phase Sync Failed.');
     } finally {
       setIsGenerating(false);
     }
@@ -137,8 +138,6 @@ export function ActiveWorkspace() {
     if (!state.currentChallenge) return;
     
     const newTurnCount = (state.turnCount || 0) + 1;
-    
-    // Safety check for effect_momentum if it's missing in AI response
     const momentumEffect = (option as any).effect_momentum || 0;
 
     const newState = {
@@ -149,6 +148,7 @@ export function ActiveWorkspace() {
       impactScore: Math.round(state.impactScore + (option.effect_impact * 2) + (option.effect_trust * 1.5)),
       turnCount: newTurnCount,
     };
+
     const historyItem = {
       id: Math.random().toString(36).substring(7),
       challenge: state.currentChallenge,
@@ -169,340 +169,337 @@ export function ActiveWorkspace() {
       decisions: [...(state.decisions || []), historyItem],
       currentChallenge: undefined 
     });
-  };
 
-  const handleUndo = async () => {
-    await undoDecision();
-    toast.info('Reverted to previous decision');
-  };
-
-  const handleResourceChange = (key: 'staff' | 'tech' | 'marketing', value: number) => {
-    if (!state.resourceAllocation) return;
-    const current = state.resourceAllocation[key];
-    const diff = value - current;
-    
-    const keys = ['staff', 'tech', 'marketing'] as const;
-    const others = keys.filter(k => k !== key);
-    
-    let newAlloc = { ...state.resourceAllocation, [key]: value };
-    let remainder = 100 - value;
-    
-    const otherTotal = newAlloc[others[0]] + newAlloc[others[1]];
-    if (otherTotal === 0) {
-      newAlloc[others[0]] = Math.round(remainder / 2);
-      newAlloc[others[1]] = remainder - newAlloc[others[0]];
-    } else {
-      newAlloc[others[0]] = Math.round((newAlloc[others[0]] / otherTotal) * remainder);
-      newAlloc[others[1]] = remainder - newAlloc[others[0]];
+    if (newTurnCount % turnsPerMilestone === 0) {
+      setShowReport(true);
     }
-
-    updateState({ resourceAllocation: newAlloc });
   };
 
   const exportCSV = () => {
     try {
-      const headers = ['Day', 'Challenge', 'Decision', 'Trust', 'Impact', 'Budget'];
+      const headers = ['Round', 'Challenge', 'Execution Move', 'Trust Level', 'Impact Level', 'Budget Runway'];
       const rows = (state.decisions || []).map((d, i) => [
-        `Day ${i + 1}`,
+        `Round ${i + 1}`,
         `"${d.challenge.title.replace(/"/g, '""')}"`,
         `"${d.chosenOption.text.replace(/"/g, '""')}"`,
         d.previousState.trust,
         d.previousState.socialImpact,
         d.previousState.budget
       ]);
-      
       const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `Yukti_Report_${state.scenarioId}.csv`;
+      link.download = `Yukti_Strategic_Report_${state.scenarioId}.csv`;
       link.click();
-      toast.success('Report Exported!');
+      toast.success('Strategy Report Exported!');
     } catch (err) {
       toast.error('Export failed');
     }
   };
 
   const phases = [
-    { id: 'discovery', label: 'Discovery', description: 'Mission Ideation', icon: Radio },
-    { id: 'strategy', label: 'Strategy', description: 'Pitch & Analysis', icon: BarChart3 },
-    { id: 'execution', label: 'Execution', description: 'Live Simulation', icon: Play },
+    { id: 'discovery', label: 'Discovery', icon: Radio },
+    { id: 'strategy', label: 'Strategy', icon: BarChart3 },
+    { id: 'execution', label: 'Execution', icon: Play },
   ];
 
+  const operatingSustainability = Math.round((state.trust * 0.4) + (state.socialImpact * 0.4) + ((state.budget / 100000) * 20));
+
   return (
-    <div className="grid grid-cols-12 gap-8 items-start min-h-[85vh]">
-      {/* LEFT NAV: THE TIMELINE */}
-      <div className="col-span-12 lg:col-span-2 space-y-6">
-        <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col h-full">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-8 ml-2">Phase Timeline</p>
-          <div className="space-y-4">
-            {phases.map((p, idx) => (
-              <button
-                key={p.id}
-                onClick={() => updateState({ currentPhase: p.id as any })}
-                className={cn(
-                  "w-full text-left p-4 rounded-3xl transition-all relative group",
-                  state.currentPhase === p.id 
-                    ? "bg-primary text-white shadow-xl shadow-primary/20" 
-                    : "hover:bg-slate-50 text-slate-600"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={cn(
-                    "p-2 rounded-xl",
-                    state.currentPhase === p.id ? "bg-white/20" : "bg-slate-100 group-hover:bg-primary/5"
-                  )}>
-                    <p.icon size={18} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-tighter leading-none">{p.label}</p>
-                    <p className={cn("text-[10px] opacity-60 mt-1 truncate max-w-[80px]", state.currentPhase === p.id ? "text-white" : "text-slate-400")}>{p.description}</p>
-                  </div>
-                </div>
-                {idx < phases.length - 1 && (
-                  <div className="absolute left-9 -bottom-4 w-[2px] h-4 bg-slate-100" />
-                )}
-              </button>
-            ))}
-          </div>
+    <div className="grid grid-cols-12 gap-10 items-start min-h-[85vh] pb-20">
+      {/* PHASE NAVIGATION */}
+      <div className="col-span-12 lg:col-span-1 flex flex-col items-center">
+        <div className="bg-slate-900 p-4 rounded-full border border-slate-800 shadow-2xl flex flex-col h-fit items-center w-18 gap-8 relative">
+           <div className="absolute top-10 bottom-10 w-[2px] bg-slate-800 z-0" />
+           {phases.map((p) => (
+             <button
+               key={p.id}
+               onClick={() => updateState({ currentPhase: p.id as any })}
+               className={cn(
+                 "group relative z-10 w-12 h-12 rounded-2xl flex items-center justify-center transition-all border-2",
+                 state.currentPhase === p.id 
+                   ? "bg-primary border-primary text-slate-950 shadow-[0_0_15px_rgba(45,212,191,0.4)]" 
+                   : "bg-slate-950 border-slate-800 text-slate-600 hover:border-primary/50 hover:text-primary"
+               )}
+             >
+               <p.icon size={20} />
+               <div className="absolute left-16 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-950 border border-slate-800 text-white text-[10px] px-3 py-1.5 rounded-lg font-black tracking-widest uppercase pointer-events-none whitespace-nowrap shadow-2xl z-50">
+                 {p.label}
+               </div>
+             </button>
+           ))}
         </div>
       </div>
 
-      {/* CENTER STAGE */}
-      <div className="col-span-12 lg:col-span-7">
+      {/* STAGE AREA */}
+      <div className="col-span-12 lg:col-span-8">
         <AnimatePresence mode="wait">
-          {state.currentPhase === 'discovery' && (
+          {state.status === 'completed' ? (
             <motion.div 
-               key="discovery"
+               key="completed"
                initial={{ opacity: 0, scale: 0.95 }}
                animate={{ opacity: 1, scale: 1 }}
-               exit={{ opacity: 0, scale: 0.95 }}
-               className="bg-white p-12 rounded-[3rem] shadow-sm border border-slate-100 h-full flex flex-col justify-center items-center text-center space-y-8"
+               className="bg-slate-900 border border-slate-800 p-12 rounded-[3.5rem] shadow-2xl relative overflow-hidden"
             >
-              <div className="p-8 bg-primary/5 rounded-full animate-pulse">
-                <Radio className="text-primary w-16 h-16" />
-              </div>
-              <div className="max-w-md">
-                <h3 className="text-4xl font-headline font-black text-on-surface mb-4">Mission Discovery</h3>
-                <p className="text-slate-500 text-lg leading-relaxed">The AI has captured your vision. You can refine your ideation in the <b>Simulation Hub</b> or proceed to strategy mapping.</p>
-              </div>
-              <button 
-                onClick={() => updateState({ currentPhase: 'strategy' })}
-                className="bg-primary text-white px-10 py-5 rounded-3xl font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all"
-              >
-                Enter Discovery Strategy →
-              </button>
-            </motion.div>
-          )}
-
-          {state.currentPhase === 'strategy' && (
-            <motion.div 
-               key="strategy"
-               initial={{ opacity: 0, y: 20 }}
-               animate={{ opacity: 1, y: 0 }}
-               exit={{ opacity: 0, y: -20 }}
-               className="h-full"
-            >
-              <AcceleratorAnalysis />
-              <div className="mt-8 flex justify-end">
-                <button 
-                  onClick={() => updateState({ currentPhase: 'execution' })}
-                  className="bg-secondary text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2"
-                >
-                  Proceed to Execution Stage <Zap size={18} />
-                </button>
-              </div>
-            </motion.div>
-          )}
-
-          {state.currentPhase === 'execution' && (
-            <motion.div 
-               key="execution"
-               initial={{ opacity: 0, y: 20 }}
-               animate={{ opacity: 1, y: 0 }}
-               exit={{ opacity: 0, y: -20 }}
-               className="space-y-8"
-            >
-              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between">
-                <div className="flex gap-4 items-center">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-black">
-                    {state.turnCount || 0}
+               <div className="absolute top-0 right-0 p-12 opacity-5 rotate-12">
+                  <Trophy size={200} />
+               </div>
+               <div className="text-center mb-12">
+                  <div className="w-20 h-20 bg-primary/10 text-primary border border-primary/20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl">
+                     <Trophy size={40} />
                   </div>
-                  <div>
-                    <h4 className="text-sm font-black text-on-surface uppercase tracking-tight">
-                      {state.turnCount <= 4 ? "Milestone 1: Community Trust" : 
-                       state.turnCount <= 8 ? "Milestone 2: Operational Growth" : "Milestone 3: Global Scale"}
-                    </h4>
-                    <p className="text-[10px] items-center text-slate-400 font-bold uppercase tracking-widest">Targeting Stability</p>
-                  </div>
-                </div>
-                <div className="flex-1 max-w-[200px] ml-8">
-                   <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                     <div 
-                       className="h-full bg-primary transition-all duration-1000" 
-                       style={{ width: `${Math.min(100, ((state.turnCount || 0) % 4 || 4) / 4 * 100)}%` }} 
-                     />
-                   </div>
-                </div>
-              </div>
+                  <h2 className="text-6xl font-black text-white italic tracking-tighter">Strategic Victory.</h2>
+                  <p className="text-slate-500 font-black uppercase tracking-[0.4em] text-[10px] mt-4">Mission: {state.scenarioName}</p>
+               </div>
 
-              <section className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 relative overflow-hidden group min-h-[500px] flex flex-col border-b-[8px] border-primary/20">
-                <div className="relative flex-1 flex flex-col">
-                  <div className="flex items-center justify-between mb-8">
-                     <span className="bg-teal-50 text-primary px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-primary/10">Active Simulation</span>
-                     {state.decisions.length > 0 && !isGenerating && (
-                       <button onClick={handleUndo} className="text-xs font-bold text-slate-400 hover:text-primary transition-colors flex items-center gap-1">
-                         <Play size={10} className="rotate-180" /> Undo Move
-                       </button>
-                     )}
-                  </div>
-
-                  {isGenerating ? (
-                    <div className="flex-1 flex flex-col items-center justify-center space-y-6">
-                      <div className="relative">
-                        <div className="w-20 h-20 border-4 border-primary/10 border-t-primary rounded-full animate-spin" />
-                        <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary w-6 h-6 animate-pulse" />
-                      </div>
-                      <p className="text-slate-400 font-bold tracking-widest uppercase text-xs">Simulating next challenge...</p>
+               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
+                  {[
+                    { label: 'Social Impact', value: state.socialImpact, icon: Heart, color: 'text-rose-500' },
+                    { label: 'Public Trust', value: state.trust, icon: Users, color: 'text-blue-400' },
+                    { label: 'Sustainability', value: operatingSustainability, icon: TrendingUp, color: 'text-emerald-400' },
+                    { label: 'Mission Score', value: state.impactScore, icon: Sparkles, color: 'text-primary' }
+                  ].map(stat => (
+                    <div key={stat.label} className="bg-slate-950 p-6 rounded-[2.5rem] border border-slate-800 text-center">
+                       <stat.icon className={cn("mx-auto mb-4", stat.color)} size={24} />
+                       <p className="text-3xl font-black text-white">{stat.value}{stat.label !== 'Mission Score' ? '%' : ''}</p>
+                       <p className="text-[10px] font-black uppercase text-slate-600 tracking-widest mt-2">{stat.label}</p>
                     </div>
-                  ) : (
-                    <>
-                      <div className="relative h-48 -mx-10 -mt-10 mb-10 overflow-hidden border-b border-slate-100">
-                        <img 
-                          src={`https://picsum.photos/seed/${(state.currentChallenge as any)?.visual_keyword || 'impact'}/800/400`} 
-                          alt="Challenge" 
-                          className="w-full h-full object-cover opacity-80"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent" />
-                      </div>
-                      <h3 className="text-4xl font-headline font-black text-on-surface mb-6 leading-tight">
-                        {state.currentChallenge?.title || "Evaluating Environment..."}
-                      </h3>
-                      <p className="text-xl text-slate-600 leading-relaxed mb-10 font-body">
-                        {state.currentChallenge?.description}
-                      </p>
-                      
-                      {state.currentChallenge?.quote && (
-                        <div className="bg-slate-50 p-6 rounded-3xl border-l-4 border-primary italic text-slate-500 mb-10 text-lg">
-                          "{state.currentChallenge.quote}"
-                        </div>
-                      )}
+                  ))}
+               </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-auto">
-                        {state.currentChallenge?.options.map((opt, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleDecision(opt)}
-                            className="bg-white border-2 border-slate-100 p-6 rounded-3xl text-left hover:border-primary hover:bg-primary/5 transition-all group relative active:scale-[0.98]"
-                          >
-                            <p className="font-bold text-on-surface mb-3 group-hover:text-primary transition-colors pr-8 leading-snug">{opt.text}</p>
-                            <div className="flex gap-4">
-                              <span className={cn("text-[10px] font-black uppercase", opt.effect_impact > 0 ? "text-emerald-600" : "text-slate-400")}>Impact {opt.effect_impact >= 0 ? '+' : ''}{opt.effect_impact}</span>
-                              <span className={cn("text-[10px] font-black uppercase", opt.effect_trust > 0 ? "text-blue-600" : "text-slate-400")}>Trust {opt.effect_trust >= 0 ? '+' : ''}{opt.effect_trust}</span>
-                              <span className={cn("text-[10px] font-black uppercase", opt.effect_budget < 0 ? "text-red-500" : "text-emerald-600")}>Budget {opt.effect_budget >= 0 ? '+' : ''}${Math.abs(opt.effect_budget).toLocaleString()}</span>
-                            </div>
-                            <ArrowRight size={20} className="absolute bottom-6 right-6 text-primary opacity-0 group-hover:opacity-100 transition-all translate-x-[-10px] group-hover:translate-x-0" />
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </section>
-
-              {/* Insights */}
-              <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-                  <Users size={14} /> Stakeholder Council
-                </h4>
-                <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide">
-                   {state.stakeholderFeedback.length === 0 ? (
-                     <div className="w-full text-center py-4 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-100">
-                        <p className="text-slate-400 text-sm italic">Observing decisions... feedback pending.</p>
-                     </div>
-                   ) : (
-                     state.stakeholderFeedback.map((f) => (
-                       <div key={f.id} className="flex-shrink-0 w-80 bg-slate-50 p-6 rounded-3xl border border-slate-100 hover:bg-white hover:shadow-lg transition-all">
-                         <div className="flex items-center gap-3 mb-4">
-                           <img src={f.avatar} className="w-10 h-10 rounded-full shadow-sm" alt={f.name} />
-                           <div>
-                             <p className="text-sm font-bold text-on-surface">{f.name}</p>
-                             <p className="text-[10px] text-slate-400 uppercase font-black">{f.role}</p>
-                           </div>
-                         </div>
-                         <p className="text-sm text-slate-600 leading-relaxed italic">"{f.message}"</p>
-                       </div>
-                     ))
-                   )}
-                </div>
-              </div>
+               <div className="bg-slate-950/50 backdrop-blur-xl border border-slate-800 p-10 rounded-[3rem] mb-10">
+                  <h3 className="text-2xl font-black text-white mb-6 italic flex items-center gap-3">
+                    <Zap className="text-primary" /> Strategic Review Conclusion
+                  </h3>
+                  <p className="text-slate-400 text-lg leading-relaxed italic opacity-90">
+                    "The {state.scenarioName} mission has solidified its position in the ecosystem. 
+                    With a sustainability rating of {operatingSustainability}%, your venture has balanced growth with integrity. 
+                    Your strategic moves are now archived in the project history."
+                  </p>
+                  <div className="mt-10 flex gap-6">
+                     <button onClick={exportCSV} className="flex-1 bg-white/5 hover:bg-white/10 px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all border border-white/5 flex items-center justify-center gap-3">
+                        <Download size={18} /> Export Full Report
+                     </button>
+                     <button onClick={() => updateState({ status: 'active', currentPhase: 'strategy' })} className="flex-1 bg-primary text-slate-950 px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3">
+                        Re-evaluate Strategy
+                     </button>
+                  </div>
+               </div>
             </motion.div>
+          ) : (
+            <>
+              {state.currentPhase === 'discovery' && (
+                <motion.div key="discovery" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-slate-900 border border-slate-800 rounded-[3rem] p-20 flex flex-col items-center text-center">
+                   <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center text-primary mb-10 animate-pulse">
+                      <Radio size={48} />
+                   </div>
+                   <h3 className="text-5xl font-black text-white mb-6 italic">Identifying Opportunity.</h3>
+                   <p className="text-slate-500 text-xl max-w-md leading-relaxed mb-12">Capture the core of your mission. Our AI engines are synchronizing with your pitch.</p>
+                   <button onClick={() => updateState({ currentPhase: 'strategy' })} className="bg-primary text-slate-950 px-12 py-5 rounded-2xl font-black text-xl flex items-center gap-4 transition-all active:scale-95 shadow-2xl shadow-primary/20">
+                      Phase Start: Strategy Lab <ArrowRight />
+                   </button>
+                </motion.div>
+              )}
+
+              {state.currentPhase === 'strategy' && (
+                <motion.div key="strategy" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="h-full">
+                   <AcceleratorAnalysis />
+                   <div className="mt-8 flex justify-end">
+                      <button onClick={() => updateState({ currentPhase: 'execution' })} className="bg-emerald-500 text-slate-950 px-10 py-5 rounded-2xl font-black text-lg flex items-center gap-3 shadow-2xl shadow-emerald-500/20 active:scale-95 transition-all">
+                        Launch Live Execution <Zap size={20} />
+                      </button>
+                   </div>
+                </motion.div>
+              )}
+
+              {state.currentPhase === 'execution' && (
+                <motion.div key="execution" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+                   {/* MILESTONE CONTROL */}
+                   <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] flex items-center justify-between shadow-xl">
+                      <div className="flex items-center gap-6">
+                         <div className="w-16 h-16 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center text-primary font-black text-xl">
+                            {state.currentMilestoneIndex + 1}<span className="text-slate-700 text-sm">/3</span>
+                         </div>
+                         <div>
+                            <h4 className="text-2xl font-black text-white italic tracking-tight">{currentMilestone.name}</h4>
+                            <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mt-1">{currentMilestone.Goal}</p>
+                         </div>
+                      </div>
+                      <div className="flex gap-4">
+                         <div className="bg-slate-950 px-6 py-2 rounded-2xl border border-slate-800 text-center">
+                            <p className="text-[9px] font-black uppercase text-slate-700 mb-1">Current Turn</p>
+                            <p className="text-xl font-black text-white">{(state.turnCount % 4) || 4}<span className="text-slate-600 text-sm">/4</span></p>
+                         </div>
+                         {!isGenerating && state.decisions.length > 0 && (
+                            <button onClick={handleUndo} className="w-12 h-12 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-500 hover:text-primary transition-all">
+                               <RotateCcw size={20} />
+                            </button>
+                         )}
+                      </div>
+                   </div>
+
+                   {showReport ? (
+                      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border-t-8 border-primary p-12 rounded-[3rem] shadow-2xl text-white relative">
+                         <h3 className="text-4xl font-black mb-8 italic tracking-tighter">Strategic Review: M{state.currentMilestoneIndex + 1}</h3>
+                         <div className="grid grid-cols-2 gap-10 mb-12">
+                            <div className="space-y-4">
+                               <label className="text-emerald-400 text-[10px] font-black uppercase tracking-widest">Growth & Impact</label>
+                               <div className="space-y-3">
+                                  {state.decisions.slice(-turnsPerMilestone).map((d: any, i) => (
+                                    <div key={i} className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
+                                       <p className="text-white font-bold leading-tight">{d.chosenOption.text}</p>
+                                    </div>
+                                  ))}
+                               </div>
+                            </div>
+                            <div className="space-y-4">
+                               <label className="text-rose-500 text-[10px] font-black uppercase tracking-widest">Resource Allocation</label>
+                               <div className="space-y-3">
+                                  {state.decisions.slice(-turnsPerMilestone).map((d: any, i) => (
+                                    <div key={i} className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
+                                       <p className="text-rose-500 font-black">-${Math.abs(d.chosenOption.effect_budget).toLocaleString()}</p>
+                                    </div>
+                                  ))}
+                               </div>
+                            </div>
+                         </div>
+                         <button 
+                           onClick={() => {
+                              if (state.currentMilestoneIndex >= 2) updateState({ status: 'completed' });
+                              else {
+                                 updateState({ currentMilestoneIndex: state.currentMilestoneIndex + 1 });
+                                 setShowReport(false);
+                              }
+                           }}
+                           className="w-full bg-primary text-slate-950 py-6 rounded-[2rem] font-black text-xl flex items-center justify-center gap-4 active:scale-95 transition-all shadow-2xl shadow-primary/20"
+                         >
+                            Proceed to Phase {state.currentMilestoneIndex + 2} <ArrowRight />
+                         </button>
+                      </motion.div>
+                   ) : (
+                      <div className="bg-slate-900 border border-slate-800 rounded-[3.5rem] overflow-hidden flex flex-col min-h-[600px] shadow-2xl relative">
+                         {isGenerating ? (
+                           <div className="flex-1 flex flex-col items-center justify-center space-y-8 bg-slate-900/50 backdrop-blur-md z-50">
+                              <Loader2 className="w-16 h-16 text-primary animate-spin" />
+                              <p className="text-primary font-black uppercase tracking-[0.4em] text-[10px] animate-pulse">Calculating Multi-Stakeholder Impact...</p>
+                           </div>
+                         ) : (
+                           <>
+                             {/* MINIMIZED IMAGE SECTION */}
+                             <div className="relative h-64 overflow-hidden border-b border-slate-800">
+                                <img 
+                                   src={`https://picsum.photos/seed/${(state.currentChallenge as any)?.visual_keyword || 'impact'}/800/400`} 
+                                   className="w-full h-full object-cover opacity-50"
+                                   alt=""
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-slate-900 to-transparent" />
+                                <div className="absolute top-8 left-8">
+                                   <div className="bg-primary/20 border border-primary/30 px-4 py-1.5 rounded-full backdrop-blur-md">
+                                      <p className="text-primary uppercase font-black text-[10px] tracking-widest">Active Dilemma</p>
+                                   </div>
+                                </div>
+                             </div>
+
+                             {/* CHALLENGE CONTENT */}
+                             <div className="p-12 flex-1 flex flex-col">
+                                <h3 className="text-4xl font-black text-white mb-6 italic leading-tight tracking-tighter">
+                                   {state.currentChallenge?.title}
+                                </h3>
+                                <p className="text-xl text-slate-400 font-medium leading-relaxed italic mb-12 opacity-80">
+                                   "{state.currentChallenge?.description}"
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-auto">
+                                   {state.currentChallenge?.options.map((opt, i) => (
+                                     <button
+                                       key={i}
+                                       onClick={() => handleDecision(opt)}
+                                       className="bg-slate-950 hover:bg-primary border-2 border-slate-800 hover:border-primary p-6 rounded-[2rem] text-left transition-all group flex items-center justify-between active:scale-95"
+                                     >
+                                        <span className="text-lg font-black text-slate-400 group-hover:text-slate-950 transition-colors leading-tight">{opt.text}</span>
+                                        <ArrowRight size={20} className="text-slate-700 group-hover:text-slate-950 opacity-0 group-hover:opacity-100 transition-all" />
+                                     </button>
+                                   ))}
+                                </div>
+                             </div>
+                           </>
+                         )}
+                      </div>
+                   )}
+
+                   {/* STAKEHOLDER COUNCIL */}
+                   <div className="bg-slate-950 border border-slate-800 p-8 rounded-[2.5rem] shadow-xl overflow-hidden">
+                      <h4 className="text-[10px] font-black uppercase text-slate-700 tracking-[0.4em] mb-8">Executive Sentiment</h4>
+                      <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide no-scrollbar">
+                         {state.stakeholderFeedback.map((f) => (
+                           <div key={f.id} className="flex-shrink-0 w-80 bg-slate-900/50 p-6 rounded-[2rem] border border-slate-800 hover:border-primary/20 transition-all">
+                              <div className="flex items-center gap-4 mb-4">
+                                 <img src={f.avatar} className="w-12 h-12 rounded-2xl border border-slate-800" alt="" />
+                                 <div>
+                                    <p className="text-white font-black text-sm">{f.name}</p>
+                                    <p className="text-[9px] font-black uppercase text-primary tracking-widest">{f.role}</p>
+                                 </div>
+                              </div>
+                              <p className="text-sm text-slate-500 leading-relaxed italic font-medium">"{f.message}"</p>
+                           </div>
+                         ))}
+                      </div>
+                   </div>
+                </motion.div>
+              )}
+            </>
           )}
         </AnimatePresence>
       </div>
 
-      {/* RIGHT PANEL: GAUGES */}
+      {/* GAUGES SIDEBAR */}
       <div className="col-span-12 lg:col-span-3 space-y-6">
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 sticky top-10">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-8 ml-2 flex items-center gap-2">
-            <BarChart3 size={12} /> Execution Dashboard
-          </p>
-          
-          <div className="space-y-12">
-            {[
-              { label: 'Financial Runway', icon: Wallet, value: state.budget, max: 100000, color: 'emerald', prefix: '$' },
-              { label: 'Social Impact', icon: Sparkles, value: state.socialImpact, max: 100, color: 'primary', suffix: '%' },
-              { label: 'Stakeholder Trust', icon: Heart, value: state.trust, max: 100, color: 'blue', suffix: '%' },
-              { label: 'Team Momentum', icon: TrendingUp, value: state.momentum, max: 100, color: 'amber', suffix: '%' },
-            ].map((g) => (
-              <div key={g.label} className="space-y-4">
-                <div className="flex justify-between items-end">
-                   <div className="flex items-center gap-2">
-                      <div className={cn("p-2 rounded-xl", `bg-${g.color}-50 text-${g.color}-600`)}>
-                        <g.icon size={16} />
-                      </div>
-                      <span className="text-[11px] font-black uppercase text-slate-500 tracking-tighter">{g.label}</span>
-                   </div>
-                   <span className="text-xl font-headline font-black text-on-surface">
-                     {g.prefix}{g.value.toLocaleString()}{g.suffix}
-                   </span>
-                </div>
-                <div className="h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-50">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${Math.min(100, (g.value / g.max) * 100)}%` }}
-                    className={cn(
-                      "h-full rounded-full transition-all duration-1000 shadow-inner",
-                      g.color === 'primary' ? "bg-primary" : `bg-${g.color}-500`
-                    )}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+         <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] shadow-2xl sticky top-32">
+            <h5 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-700 text-center mb-10">System Vitals</h5>
+            <div className="space-y-10">
+               {[
+                 { label: 'Budget Runway', value: state.budget, max: 100000, color: 'text-emerald-400', bar: 'bg-emerald-400', icon: Wallet, prefix: '$' },
+                 { label: 'Impact Factor', value: state.socialImpact, max: 100, color: 'text-rose-500', bar: 'bg-rose-500', icon: Heart, suffix: '%' },
+                 { label: 'Stakeholder Trust', value: state.trust, max: 100, color: 'text-blue-400', bar: 'bg-blue-400', icon: Users, suffix: '%' },
+                 { label: 'Sustainability Index', value: operatingSustainability, max: 100, color: 'text-primary', bar: 'bg-primary', icon: TrendingUp, suffix: '%' }
+               ].map((v) => (
+                 <div key={v.label} className="space-y-3">
+                    <div className="flex justify-between items-end">
+                       <div className="flex items-center gap-3">
+                          <v.icon className={v.color} size={16} />
+                          <span className="text-[10px] font-black uppercase tracking-tighter text-slate-500">{v.label}</span>
+                       </div>
+                       <p className="text-xl font-black text-white">{v.prefix}{v.value.toLocaleString()}{v.suffix}</p>
+                    </div>
+                    <div className="h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                       <motion.div 
+                         initial={{ width: 0 }}
+                         animate={{ width: `${Math.min(100, (v.value / v.max) * 100)}%` }}
+                         className={cn("h-full", v.bar)}
+                       />
+                    </div>
+                 </div>
+               ))}
+            </div>
 
-          <div className="mt-12 pt-8 border-t border-slate-50 space-y-4">
-             <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
-               <div className="flex items-center gap-2 mb-2">
-                 <AlertTriangle size={14} className="text-amber-500" />
-                 <span className="text-[10px] font-black uppercase text-slate-400">Risk Assessment</span>
+            <div className="mt-12 pt-8 border-t border-slate-800/50 space-y-4">
+               <div className="bg-slate-950 p-5 rounded-[1.5rem] border border-slate-800">
+                  <div className="flex items-center gap-2 mb-2">
+                     <AlertTriangle size={12} className="text-amber-500" />
+                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-600">Strategic Alert</label>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium leading-relaxed italic">
+                     {state.budget < 10000 ? "🚨 RUNWAY CRITICAL. SOURCE EMERGENCY FUNDING." : 
+                      state.trust < 40 ? "⚠️ TRUST BREACH. REDESIGN COMMUNITY CHANNELS." : 
+                      "✅ ALL SYSTEMS NOMINAL. MISSION IS STABLE."}
+                  </p>
                </div>
-               <p className="text-xs text-slate-600 leading-snug">
-                 {state.trust < 40 ? "Trust levels critical. Stakeholders may withdraw support soon." : 
-                  state.budget < 10000 ? "Low runway detected. Focus on revenue-generating decisions." :
-                  "Execution trajectory stable. Momentum is high."}
-               </p>
-             </div>
-             
-             <button 
-               onClick={exportCSV}
-               className="w-full flex items-center justify-center gap-2 py-4 bg-primary/5 border-2 border-primary/10 rounded-3xl text-sm font-bold text-primary hover:bg-primary hover:text-white transition-all shadow-sm"
-             >
-               <Download size={18} /> Export Data
-             </button>
-          </div>
-        </div>
+               <button onClick={exportCSV} className="w-full flex items-center justify-center gap-3 py-5 bg-primary/10 hover:bg-primary border border-primary/20 text-primary hover:text-slate-950 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all group">
+                  <Download size={18} className="group-hover:translate-y-0.5 transition-all" /> Strategy Report
+               </button>
+            </div>
+         </div>
       </div>
     </div>
   );
