@@ -5,6 +5,21 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Safely converts AI-generated values to strings for React rendering.
+ * Specifically handles objects with keys like {area, detail} if they occur.
+ */
+export function safeRender(val: any): string {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'object') {
+    if (val.area && val.detail) return `${val.area}: ${val.detail}`;
+    if (val.detail) return String(val.detail);
+    if (val.area) return String(val.area);
+    return JSON.stringify(val);
+  }
+  return String(val);
+}
+
 export function cleanJsonParse(text: string) {
   try {
     // 1. Try direct parse

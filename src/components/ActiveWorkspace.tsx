@@ -28,16 +28,28 @@ import {
   Trophy,
   CheckCircle,
   AlertCircle,
-  Loader2
+  Circle, 
+  FileText, 
+  LayoutDashboard, 
+  Target, 
+  Rocket, 
+  ChevronRight, 
+  Brain, 
+  UserPlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn, cleanJsonParse } from '../lib/utils';
 import { toast } from 'sonner';
 import { useSimulation, ChallengeOption } from '../context/SimulationContext';
 import { AcceleratorAnalysis } from './AcceleratorAnalysis';
+import { RoadmapFlowchart } from './RoadmapFlowchart';
+import { AIMeetingRoom } from './AIMeetingRoom';
+import { useAuth } from '../context/AuthContext';
+import { getMentorFeedback } from '../services/geminiService';
 
-export function ActiveWorkspace() {
-  const { state, updateState, undoDecision } = useSimulation();
+export function ActiveWorkspace({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
+  const { state, updateState, undoDecision, t } = useSimulation();
+  const { user } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -46,14 +58,15 @@ export function ActiveWorkspace() {
   const turnsPerMilestone = 4;
   
   const milestoneDetails = [
-    { name: "Strategic Foundation", Goal: "Community Trust & Validation" },
-    { name: "Operational Growth", Goal: "Process Efficiency & Scaling" },
-    { name: "Global Impact", Goal: "Sustainability & Ecosystem Influence" }
+    { name: t('milestone_1_name'), Goal: t('milestone_1_goal') },
+    { name: t('milestone_2_name'), Goal: t('milestone_2_goal') },
+    { name: t('milestone_3_name'), Goal: t('milestone_3_goal') }
   ];
 
   const currentMilestone = milestoneDetails[state.currentMilestoneIndex] || milestoneDetails[0];
 
   useEffect(() => {
+    // Kick off generation if we are in execution phase and don't have a challenge
     if (state.currentPhase === 'execution' && state.status === 'active' && !state.currentChallenge && !isGenerating && !showReport) {
       generateNextChallenge(state.lastDecision);
     }
@@ -71,8 +84,8 @@ export function ActiveWorkspace() {
         You are the game master for a social entrepreneurship simulation. Provide the ENTIRE JSON response strictly.
         Project: ${state.scenarioName}
         Region: ${state.location || state.region}
-        Language: ${state.gameLanguage || 'English'}
-        Current Status - Trust: ${state.trust}%, Impact: ${state.socialImpact}%, Budget: $${state.budget.toLocaleString()}
+        Language: ${state.gameLanguage || 'English'} (ALL JSON values must be in this language)
+        Current Status - Trust: ${state.trust}%, Impact: ${state.socialImpact}%, Budget: $${(state.budget ?? 0).toLocaleString()}, Momentum: ${state.momentum}%
         
         ${isBankrupt ? 'CRITICAL: Out of funds! Focus on emergency measures.' : ''}
         ${previousChoiceText ? `The user last decided: "${previousChoiceText}". Respond specifically to this.` : 'This is the start.'}
@@ -80,26 +93,31 @@ export function ActiveWorkspace() {
         Generate a new scenario JSON:
         {
           "title": "Short title",
-          "description": "Detailed 2-3 sentence description.",
+          "description": "Detailed 2-3 sentence description of the dilemma.",
           "quote": "A quote from a stakeholder",
-          "visual_keyword": "object like 'water-tank'",
-          "stakeholder_reaction": { "name": "Name", "role": "Role", "message": "Reaction text" },
+          "visual_keyword": "A single descriptive word for an image (e.g., 'solar-farm')",
+          "stakeholder_reaction": { 
+            "name": "Stakeholder Name", 
+            "role": "Role", 
+            "message": "Reaction to user's PREVIOUS action: '${previousChoiceText}'. Was it smart? risky? Why?" 
+          },
           "options": [
             { "text": "Option 1", "effect_trust": 5, "effect_impact": 10, "effect_budget": -5000, "effect_momentum": 5 },
-            { "text": "Option 2", "effect_trust": -2, "effect_impact": 15, "effect_budget": -12000, "effect_momentum": 8 },
-            { "text": "Option 3", "effect_trust": 10, "effect_impact": 5, "effect_budget": -2000, "effect_momentum": 2 },
-            { "text": "Option 4", "effect_trust": -8, "effect_impact": 2, "effect_budget": -0, "effect_momentum": 0 }
+            ... (total 4 options)
           ]
         }
       `;
       
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
           model: 'llama-3.1-8b-instant',
           messages: [
-            { role: 'system', content: `Social Entrepreneurship Simulator. JSON ONLY. Language: ${state.gameLanguage || 'English'}` },
+            { role: 'system', content: `Social Entrepreneurship Simulator. STRICT JSON ONLY. Language: ${state.gameLanguage || 'English'}` },
             { role: 'user', content: prompt }
           ],
           response_format: { type: 'json_object' }
@@ -128,11 +146,13 @@ export function ActiveWorkspace() {
         stakeholderFeedback: updatedFeedback
       });
     } catch (e) {
-      toast.error('Phase Sync Failed.');
+      toast.error(t('error_generation'));
     } finally {
       setIsGenerating(false);
     }
   };
+
+  const [isShaking, setIsShaking] = useState(false);
 
   const handleDecision = async (option: ChallengeOption) => {
     if (!state.currentChallenge) return;
@@ -140,12 +160,29 @@ export function ActiveWorkspace() {
     const newTurnCount = (state.turnCount || 0) + 1;
     const momentumEffect = (option as any).effect_momentum || 0;
 
+    const fatigueMultiplier = 1 + (newTurnCount * 0.05);
+    
+    let adjustedTrustEffect = option.effect_trust;
+    if (adjustedTrustEffect > 0) {
+      adjustedTrustEffect = Math.round(adjustedTrustEffect / fatigueMultiplier);
+    } else if (adjustedTrustEffect < 0) {
+      adjustedTrustEffect = Math.round(adjustedTrustEffect * fatigueMultiplier);
+    }
+
+    if (adjustedTrustEffect <= -3 || option.effect_budget <= -5000) {
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 500);
+      toast.warning(t('friction_warning'), {
+        description: t('friction_desc')
+      });
+    }
+
     const newState = {
       budget: Math.max(0, state.budget + option.effect_budget),
       socialImpact: Math.min(100, Math.max(0, state.socialImpact + option.effect_impact)),
-      trust: Math.min(100, Math.max(0, state.trust + option.effect_trust)),
+      trust: Math.min(100, Math.max(0, state.trust + adjustedTrustEffect)),
       momentum: Math.min(100, Math.max(0, state.momentum + momentumEffect)),
-      impactScore: Math.round(state.impactScore + (option.effect_impact * 2) + (option.effect_trust * 1.5)),
+      impactScore: Math.round(state.impactScore + (option.effect_impact * 2) + (adjustedTrustEffect * 1.5)),
       turnCount: newTurnCount,
     };
 
@@ -170,16 +207,38 @@ export function ActiveWorkspace() {
       currentChallenge: undefined 
     });
 
+    // Trigger Mentor Feedback after every decision
+    try {
+      const feedback = await getMentorFeedback(state, option);
+      updateState({ mentorFeedback: feedback });
+    } catch (err) {
+      console.error("Mentor Feedback Error:", err);
+    }
+
     if (newTurnCount % turnsPerMilestone === 0) {
       setShowReport(true);
     }
   };
 
+  const nextMilestone = async () => {
+    setIsTransitioning(true);
+    setTimeout(async () => {
+      await updateState({ currentMilestoneIndex: Math.min(totalMilestones - 1, state.currentMilestoneIndex + 1) });
+      setShowReport(false);
+      setIsTransitioning(false);
+    }, 800);
+  };
+
+  const handleUndo = async () => {
+    await undoDecision();
+    toast.info(t('reverted_decision'));
+  };
+
   const exportCSV = () => {
     try {
-      const headers = ['Round', 'Challenge', 'Execution Move', 'Trust Level', 'Impact Level', 'Budget Runway'];
+      const headers = ['Milestone', 'Challenge', 'Decision', 'Trust', 'Impact', 'Budget'];
       const rows = (state.decisions || []).map((d, i) => [
-        `Round ${i + 1}`,
+        `Milestone ${Math.floor(i / 4) + 1}`,
         `"${d.challenge.title.replace(/"/g, '""')}"`,
         `"${d.chosenOption.text.replace(/"/g, '""')}"`,
         d.previousState.trust,
@@ -191,315 +250,473 @@ export function ActiveWorkspace() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `Yukti_Strategic_Report_${state.scenarioId}.csv`;
+      link.download = `Yukti_Blueprint_${state.scenarioId}.csv`;
       link.click();
-      toast.success('Strategy Report Exported!');
+      toast.success(t('report_exported'));
     } catch (err) {
-      toast.error('Export failed');
+      toast.error(t('export_failed'));
     }
   };
 
   const phases = [
-    { id: 'discovery', label: 'Discovery', icon: Radio },
-    { id: 'strategy', label: 'Strategy', icon: BarChart3 },
-    { id: 'execution', label: 'Execution', icon: Play },
+    { id: 'discovery', label: t('discovery'), icon: Radio },
+    { id: 'strategy', label: t('strategy'), icon: BarChart3 },
+    { id: 'execution', label: t('execution'), icon: Play },
   ];
 
-  const operatingSustainability = Math.round((state.trust * 0.4) + (state.socialImpact * 0.4) + ((state.budget / 100000) * 20));
-
   return (
-    <div className="grid grid-cols-12 gap-10 items-start min-h-[85vh] pb-20">
-      {/* PHASE NAVIGATION */}
-      <div className="col-span-12 lg:col-span-1 flex flex-col items-center">
-        <div className="bg-slate-900 p-4 rounded-full border border-slate-800 shadow-2xl flex flex-col h-fit items-center w-18 gap-8 relative">
-           <div className="absolute top-10 bottom-10 w-[2px] bg-slate-800 z-0" />
-           {phases.map((p) => (
-             <button
-               key={p.id}
-               onClick={() => updateState({ currentPhase: p.id as any })}
-               className={cn(
-                 "group relative z-10 w-12 h-12 rounded-2xl flex items-center justify-center transition-all border-2",
-                 state.currentPhase === p.id 
-                   ? "bg-primary border-primary text-slate-950 shadow-[0_0_15px_rgba(45,212,191,0.4)]" 
-                   : "bg-slate-950 border-slate-800 text-slate-600 hover:border-primary/50 hover:text-primary"
-               )}
-             >
-               <p.icon size={20} />
-               <div className="absolute left-16 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-950 border border-slate-800 text-white text-[10px] px-3 py-1.5 rounded-lg font-black tracking-widest uppercase pointer-events-none whitespace-nowrap shadow-2xl z-50">
-                 {p.label}
-               </div>
-             </button>
-           ))}
+    <div className="grid grid-cols-12 gap-8 items-start min-h-[85vh]">
+      <div className="col-span-12 lg:col-span-1 flex justify-center">
+        <div className="bg-white p-4 rounded-full shadow-sm border border-slate-100 flex flex-col h-fit items-center w-16">
+          <div className="space-y-8 relative w-full flex flex-col items-center py-4">
+            <div className="absolute left-1/2 -translate-x-1/2 top-10 bottom-10 w-0.5 bg-slate-100 z-0" />
+            {phases.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => updateState({ currentPhase: p.id as any })}
+                className={cn(
+                  "group relative z-10 w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-md border-2",
+                  state.currentPhase === p.id 
+                    ? "bg-primary border-primary text-white scale-125" 
+                    : "bg-white border-slate-100 text-slate-300 hover:border-primary/30 hover:text-primary"
+                )}
+              >
+                <p.icon size={16} />
+                <div className="absolute left-14 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[9px] px-2 py-1 rounded font-black whitespace-nowrap pointer-events-none uppercase tracking-widest">
+                  {p.label}
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* STAGE AREA */}
-      <div className="col-span-12 lg:col-span-8">
+      <div className="col-span-12 lg:col-span-8 h-full min-h-[700px]">
         <AnimatePresence mode="wait">
           {state.status === 'completed' ? (
             <motion.div 
-               key="completed"
-               initial={{ opacity: 0, scale: 0.95 }}
+               key="completion"
+               initial={{ opacity: 0, scale: 0.9 }}
                animate={{ opacity: 1, scale: 1 }}
-               className="bg-slate-900 border border-slate-800 p-12 rounded-[3.5rem] shadow-2xl relative overflow-hidden"
+               className="space-y-12"
             >
-               <div className="absolute top-0 right-0 p-12 opacity-5 rotate-12">
-                  <Trophy size={200} />
-               </div>
-               <div className="text-center mb-12">
-                  <div className="w-20 h-20 bg-primary/10 text-primary border border-primary/20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl">
-                     <Trophy size={40} />
-                  </div>
-                  <h2 className="text-6xl font-black text-white italic tracking-tighter">Strategic Victory.</h2>
-                  <p className="text-slate-500 font-black uppercase tracking-[0.4em] text-[10px] mt-4">Mission: {state.scenarioName}</p>
-               </div>
+              <div className="bg-white p-12 rounded-[3.5rem] shadow-2xl border-4 border-emerald-500/20 relative overflow-hidden">
+                <div className="absolute -top-10 -right-10 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl" />
+                
+                <div className="text-center mb-12">
+                   <div className="w-20 h-20 bg-emerald-500 text-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-emerald-500/20">
+                      <Trophy size={40} />
+                   </div>
+                   <h2 className="text-5xl font-headline font-black text-slate-900 tracking-tighter">{t('mission_accomplished')}</h2>
+                   <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-xs mt-2">{t('dossier')}: {state.scenarioName}</p>
+                </div>
 
-               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
-                  {[
-                    { label: 'Social Impact', value: state.socialImpact, icon: Heart, color: 'text-rose-500' },
-                    { label: 'Public Trust', value: state.trust, icon: Users, color: 'text-blue-400' },
-                    { label: 'Sustainability', value: operatingSustainability, icon: TrendingUp, color: 'text-emerald-400' },
-                    { label: 'Mission Score', value: state.impactScore, icon: Sparkles, color: 'text-primary' }
-                  ].map(stat => (
-                    <div key={stat.label} className="bg-slate-950 p-6 rounded-[2.5rem] border border-slate-800 text-center">
-                       <stat.icon className={cn("mx-auto mb-4", stat.color)} size={24} />
-                       <p className="text-3xl font-black text-white">{stat.value}{stat.label !== 'Mission Score' ? '%' : ''}</p>
-                       <p className="text-[10px] font-black uppercase text-slate-600 tracking-widest mt-2">{stat.label}</p>
-                    </div>
-                  ))}
-               </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
+                   {[
+                     { label: t('final_impact'), value: Math.max(0, Math.min(100, state.socialImpact)), icon: Heart, color: 'text-primary' },
+                     { label: t('public_trust'), value: Math.max(0, Math.min(100, state.trust)), icon: Users, color: 'text-blue-500' },
+                     { label: t('sustainability'), value: Math.min(100, Math.max(0, Math.round((state.trust * 0.4) + (state.socialImpact * 0.4) + ((state.budget / 100000) * 20)))), icon: TrendingUp, color: 'text-emerald-500' },
+                     { label: t('total_score'), value: state.impactScore, icon: Sparkles, color: 'text-amber-500' }
+                   ].map(kpi => (
+                     <div key={kpi.label} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-center">
+                        <kpi.icon className={cn("mx-auto mb-3", kpi.color)} size={24} />
+                        <p className="text-3xl font-black text-slate-900">{(kpi.value ?? 0).toLocaleString()}{kpi.label !== t('total_score') ? '%' : ''}</p>
+                        <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">{kpi.label}</p>
+                     </div>
+                   ))}
+                </div>
 
-               <div className="bg-slate-950/50 backdrop-blur-xl border border-slate-800 p-10 rounded-[3rem] mb-10">
-                  <h3 className="text-2xl font-black text-white mb-6 italic flex items-center gap-3">
-                    <Zap className="text-primary" /> Strategic Review Conclusion
-                  </h3>
-                  <p className="text-slate-400 text-lg leading-relaxed italic opacity-90">
-                    "The {state.scenarioName} mission has solidified its position in the ecosystem. 
-                    With a sustainability rating of {operatingSustainability}%, your venture has balanced growth with integrity. 
-                    Your strategic moves are now archived in the project history."
-                  </p>
-                  <div className="mt-10 flex gap-6">
-                     <button onClick={exportCSV} className="flex-1 bg-white/5 hover:bg-white/10 px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all border border-white/5 flex items-center justify-center gap-3">
-                        <Download size={18} /> Export Full Report
-                     </button>
-                     <button onClick={() => updateState({ status: 'active', currentPhase: 'strategy' })} className="flex-1 bg-primary text-slate-950 px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3">
-                        Re-evaluate Strategy
-                     </button>
-                  </div>
-               </div>
+                <div className="bg-slate-950 rounded-[2.5rem] p-10 text-white mb-10 border-t-8 border-emerald-500">
+                   <h3 className="text-2xl font-black mb-4 italic tracking-tight flex items-center gap-2">
+                      <Zap className="text-emerald-400" /> Executive Strategic Review
+                   </h3>
+                   <p className="text-slate-400 text-lg leading-relaxed italic">
+                      "Your leadership across the {state.scenarioName} mission has demonstrated exceptional {state.trust > 70 ? 'community trust building' : 'resource utilization'}. 
+                      With a final sustainability index of {Math.round((state.trust * 0.4) + (state.socialImpact * 0.4) + ((state.budget / 100000) * 20))}%, 
+                      your model qualifies for Tier-1 accelerator considerations and scale-up grants."
+                   </p>
+
+                   {/* Final Mentor Review Card */}
+                   {state.mentorFeedback && (
+                      <div className="mt-10 bg-emerald-500/5 rounded-3xl p-8 border border-emerald-500/10">
+                         <div className="flex items-center gap-3 mb-6">
+                            <Sparkles className="text-emerald-500" size={20} />
+                            <h4 className="text-sm font-black uppercase text-emerald-400 tracking-widest">Yukti's Final Strategic Critique</h4>
+                         </div>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-white/5 p-4 rounded-xl border border-white/5">
+                               <span className="text-[10px] font-black uppercase text-slate-500 block mb-1">Mentor Critique</span>
+                               <p className="text-sm font-medium text-slate-300 italic">"{state.mentorFeedback.critique}"</p>
+                            </div>
+                            <div className="bg-emerald-500/10 p-5 rounded-2xl border border-emerald-500/20 text-center flex flex-col justify-center">
+                               <p className="text-[10px] font-black uppercase text-emerald-400 block mb-2">Final Strategic Improvement</p>
+                               <p className="text-lg font-black text-white leading-tight tracking-tight">"{state.mentorFeedback.improvement}"</p>
+                            </div>
+                         </div>
+                      </div>
+                   )}
+
+                   <div className="mt-8 flex gap-4">
+                      <button onClick={exportCSV} className="flex-1 bg-white/10 hover:bg-white/20 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all">Download Master Report</button>
+                      <button onClick={() => updateState({ status: 'active', currentPhase: 'strategy' })} className="flex-1 bg-emerald-500 text-slate-950 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all text-center">Optimize Strategy</button>
+                   </div>
+                </div>
+              </div>
+
+              <RoadmapFlowchart decisions={state.decisions || []} />
+
+              <button 
+                onClick={() => updateState({ currentPhase: 'discovery', status: 'active', decisions: [], turnCount: 0, budget: 50000, socialImpact: 0, trust: 50, impactScore: 0, currentMilestoneIndex: 0 })}
+                className="w-full py-6 bg-white text-slate-400 hover:text-primary rounded-3xl font-black uppercase tracking-widest text-sm transition-all border-2 border-dashed border-slate-200"
+              >
+                Archive Mission & Restart Simulator
+              </button>
             </motion.div>
           ) : (
-            <>
+            <React.Fragment>
               {state.currentPhase === 'discovery' && (
-                <motion.div key="discovery" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-slate-900 border border-slate-800 rounded-[3rem] p-20 flex flex-col items-center text-center">
-                   <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center text-primary mb-10 animate-pulse">
-                      <Radio size={48} />
-                   </div>
-                   <h3 className="text-5xl font-black text-white mb-6 italic">Identifying Opportunity.</h3>
-                   <p className="text-slate-500 text-xl max-w-md leading-relaxed mb-12">Capture the core of your mission. Our AI engines are synchronizing with your pitch.</p>
-                   <button onClick={() => updateState({ currentPhase: 'strategy' })} className="bg-primary text-slate-950 px-12 py-5 rounded-2xl font-black text-xl flex items-center gap-4 transition-all active:scale-95 shadow-2xl shadow-primary/20">
-                      Phase Start: Strategy Lab <ArrowRight />
-                   </button>
+                <motion.div 
+                   key="discovery"
+                   initial={{ opacity: 0, scale: 0.95 }}
+                   animate={{ opacity: 1, scale: 1 }}
+                   exit={{ opacity: 0, scale: 0.95 }}
+                   className="bg-white p-16 rounded-[3rem] shadow-sm border border-slate-100 h-full flex flex-col justify-center items-center text-center space-y-8"
+                >
+                  <div className="p-8 bg-primary/5 rounded-full animate-pulse">
+                    <Radio className="text-primary w-16 h-16" />
+                  </div>
+                  <div className="max-w-md">
+                    <h3 className="text-4xl font-headline font-black text-on-surface mb-4">Mission Discovery</h3>
+                    <p className="text-slate-500 text-lg leading-relaxed">The AI has captured your vision. You can refine your ideation in the <b>Simulation Hub</b> or proceed to strategy mapping.</p>
+                  </div>
+                  <button 
+                    onClick={() => updateState({ currentPhase: 'strategy' })}
+                    className="bg-primary text-white px-10 py-5 rounded-3xl font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all"
+                  >
+                    Enter Strategy Lab →
+                  </button>
                 </motion.div>
               )}
 
               {state.currentPhase === 'strategy' && (
-                <motion.div key="strategy" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="h-full">
-                   <AcceleratorAnalysis />
-                   <div className="mt-8 flex justify-end">
-                      <button onClick={() => updateState({ currentPhase: 'execution' })} className="bg-emerald-500 text-slate-950 px-10 py-5 rounded-2xl font-black text-lg flex items-center gap-3 shadow-2xl shadow-emerald-500/20 active:scale-95 transition-all">
-                        Launch Live Execution <Zap size={20} />
-                      </button>
-                   </div>
+                <motion.div 
+                   key="strategy"
+                   initial={{ opacity: 0, y: 20 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   exit={{ opacity: 0, y: -20 }}
+                   className="h-full"
+                >
+                  <AcceleratorAnalysis />
+                  <div className="mt-8 flex justify-end">
+                    <button 
+                      onClick={() => updateState({ currentPhase: 'execution' })}
+                      className="bg-secondary text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2 shadow-lg hover:translate-y-[-2px] transition-all"
+                    >
+                      Enter Live Execution <Zap size={18} />
+                    </button>
+                  </div>
                 </motion.div>
               )}
 
               {state.currentPhase === 'execution' && (
-                <motion.div key="execution" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-                   {/* MILESTONE CONTROL */}
-                   <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] flex items-center justify-between shadow-xl">
-                      <div className="flex items-center gap-6">
-                         <div className="w-16 h-16 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center text-primary font-black text-xl">
-                            {state.currentMilestoneIndex + 1}<span className="text-slate-700 text-sm">/3</span>
-                         </div>
-                         <div>
-                            <h4 className="text-2xl font-black text-white italic tracking-tight">{currentMilestone.name}</h4>
-                            <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mt-1">{currentMilestone.Goal}</p>
-                         </div>
+                <motion.div 
+                   key={`execution-milestone-${state.currentMilestoneIndex}`}
+                   initial={isTransitioning ? { x: "100%", opacity: 0 } : { opacity: 0, y: 20 }}
+                   animate={{ x: 0, opacity: 1, y: 0 }}
+                   exit={{ x: "-100%", opacity: 0 }}
+                   transition={{ type: "spring", damping: 25, stiffness: 120 }}
+                   className="space-y-6 relative"
+                >
+                  <div className="bg-white p-6 rounded-[2rem] border-2 border-slate-100 flex items-center justify-between shadow-sm">
+                    <div className="flex gap-4 items-center">
+                      <div className="relative w-16 h-16">
+                        <svg className="w-full h-full transform -rotate-90">
+                           <circle cx="32" cy="32" r="28" stroke="#f1f5f9" strokeWidth="5" fill="none" />
+                           <motion.circle 
+                             cx="32" cy="32" r="28" 
+                             stroke="currentColor" 
+                             className="text-primary"
+                             strokeWidth="5" 
+                             fill="none"
+                             strokeDasharray="175.9"
+                             animate={{ strokeDashoffset: 175.9 - (175.9 * ((state.turnCount % turnsPerMilestone || turnsPerMilestone) / turnsPerMilestone)) }}
+                             strokeLinecap="round"
+                           />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center font-black text-on-surface text-sm">
+                           {state.currentMilestoneIndex + 1}/3
+                        </div>
                       </div>
-                      <div className="flex gap-4">
-                         <div className="bg-slate-950 px-6 py-2 rounded-2xl border border-slate-800 text-center">
-                            <p className="text-[9px] font-black uppercase text-slate-700 mb-1">Current Turn</p>
-                            <p className="text-xl font-black text-white">{(state.turnCount % 4) || 4}<span className="text-slate-600 text-sm">/4</span></p>
-                         </div>
-                         {!isGenerating && state.decisions.length > 0 && (
-                            <button onClick={handleUndo} className="w-12 h-12 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-500 hover:text-primary transition-all">
-                               <RotateCcw size={20} />
-                            </button>
-                         )}
+                      <div>
+                        <h4 className="text-xl font-black text-on-surface uppercase tracking-tight">
+                          {currentMilestone.name}
+                        </h4>
+                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em]">{currentMilestone.Goal}</p>
                       </div>
-                   </div>
+                    </div>
+                    <div className="hidden md:flex gap-3">
+                       <div className="bg-slate-50 px-4 py-1.5 rounded-xl border border-slate-100 text-center">
+                         <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none">Turn</p>
+                         <p className="text-lg font-black text-primary">{(state.turnCount % 4) || 4}<span className="text-sm text-slate-300">/4</span></p>
+                       </div>
+                    </div>
+                  </div>
 
-                   {showReport ? (
-                      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border-t-8 border-primary p-12 rounded-[3rem] shadow-2xl text-white relative">
-                         <h3 className="text-4xl font-black mb-8 italic tracking-tighter">Strategic Review: M{state.currentMilestoneIndex + 1}</h3>
-                         <div className="grid grid-cols-2 gap-10 mb-12">
-                            <div className="space-y-4">
-                               <label className="text-emerald-400 text-[10px] font-black uppercase tracking-widest">Growth & Impact</label>
-                               <div className="space-y-3">
-                                  {state.decisions.slice(-turnsPerMilestone).map((d: any, i) => (
-                                    <div key={i} className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
-                                       <p className="text-white font-bold leading-tight">{d.chosenOption.text}</p>
-                                    </div>
-                                  ))}
-                               </div>
-                            </div>
-                            <div className="space-y-4">
-                               <label className="text-rose-500 text-[10px] font-black uppercase tracking-widest">Resource Allocation</label>
-                               <div className="space-y-3">
-                                  {state.decisions.slice(-turnsPerMilestone).map((d: any, i) => (
-                                    <div key={i} className="bg-slate-950 p-5 rounded-2xl border border-slate-800">
-                                       <p className="text-rose-500 font-black">-${Math.abs(d.chosenOption.effect_budget).toLocaleString()}</p>
-                                    </div>
-                                  ))}
-                               </div>
-                            </div>
-                         </div>
-                         <button 
-                           onClick={() => {
-                              if (state.currentMilestoneIndex >= 2) updateState({ status: 'completed' });
-                              else {
-                                 updateState({ currentMilestoneIndex: state.currentMilestoneIndex + 1 });
-                                 setShowReport(false);
-                              }
-                           }}
-                           className="w-full bg-primary text-slate-950 py-6 rounded-[2rem] font-black text-xl flex items-center justify-center gap-4 active:scale-95 transition-all shadow-2xl shadow-primary/20"
-                         >
-                            Proceed to Phase {state.currentMilestoneIndex + 2} <ArrowRight />
-                         </button>
-                      </motion.div>
-                   ) : (
-                      <div className="bg-slate-900 border border-slate-800 rounded-[3.5rem] overflow-hidden flex flex-col min-h-[600px] shadow-2xl relative">
-                         {isGenerating ? (
-                           <div className="flex-1 flex flex-col items-center justify-center space-y-8 bg-slate-900/50 backdrop-blur-md z-50">
-                              <Loader2 className="w-16 h-16 text-primary animate-spin" />
-                              <p className="text-primary font-black uppercase tracking-[0.4em] text-[10px] animate-pulse">Calculating Multi-Stakeholder Impact...</p>
-                           </div>
-                         ) : (
-                           <>
-                             {/* MINIMIZED IMAGE SECTION */}
-                             <div className="relative h-64 overflow-hidden border-b border-slate-800">
-                                <img 
-                                   src={`https://picsum.photos/seed/${(state.currentChallenge as any)?.visual_keyword || 'impact'}/800/400`} 
-                                   className="w-full h-full object-cover opacity-50"
-                                   alt=""
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-slate-900 to-transparent" />
-                                <div className="absolute top-8 left-8">
-                                   <div className="bg-primary/20 border border-primary/30 px-4 py-1.5 rounded-full backdrop-blur-md">
-                                      <p className="text-primary uppercase font-black text-[10px] tracking-widest">Active Dilemma</p>
-                                   </div>
-                                </div>
-                             </div>
-
-                             {/* CHALLENGE CONTENT */}
-                             <div className="p-12 flex-1 flex flex-col">
-                                <h3 className="text-4xl font-black text-white mb-6 italic leading-tight tracking-tighter">
-                                   {state.currentChallenge?.title}
-                                </h3>
-                                <p className="text-xl text-slate-400 font-medium leading-relaxed italic mb-12 opacity-80">
-                                   "{state.currentChallenge?.description}"
-                                </p>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-auto">
-                                   {state.currentChallenge?.options.map((opt, i) => (
-                                     <button
-                                       key={i}
-                                       onClick={() => handleDecision(opt)}
-                                       className="bg-slate-950 hover:bg-primary border-2 border-slate-800 hover:border-primary p-6 rounded-[2rem] text-left transition-all group flex items-center justify-between active:scale-95"
-                                     >
-                                        <span className="text-lg font-black text-slate-400 group-hover:text-slate-950 transition-colors leading-tight">{opt.text}</span>
-                                        <ArrowRight size={20} className="text-slate-700 group-hover:text-slate-950 opacity-0 group-hover:opacity-100 transition-all" />
-                                     </button>
-                                   ))}
-                                </div>
-                             </div>
-                           </>
-                         )}
-                      </div>
-                   )}
-
-                   {/* STAKEHOLDER COUNCIL */}
-                   <div className="bg-slate-950 border border-slate-800 p-8 rounded-[2.5rem] shadow-xl overflow-hidden">
-                      <h4 className="text-[10px] font-black uppercase text-slate-700 tracking-[0.4em] mb-8">Executive Sentiment</h4>
-                      <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide no-scrollbar">
-                         {state.stakeholderFeedback.map((f) => (
-                           <div key={f.id} className="flex-shrink-0 w-80 bg-slate-900/50 p-6 rounded-[2rem] border border-slate-800 hover:border-primary/20 transition-all">
-                              <div className="flex items-center gap-4 mb-4">
-                                 <img src={f.avatar} className="w-12 h-12 rounded-2xl border border-slate-800" alt="" />
-                                 <div>
-                                    <p className="text-white font-black text-sm">{f.name}</p>
-                                    <p className="text-[9px] font-black uppercase text-primary tracking-widest">{f.role}</p>
+                  {showReport ? (
+                     <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-2xl relative overflow-hidden"
+                     >
+                        <div className="absolute top-0 right-0 p-8 opacity-10 rotate-12">
+                          <Trophy size={200} />
+                        </div>
+                        <h3 className="text-4xl font-headline font-black mb-1 tracking-tighter">
+                          {state.currentMilestoneIndex >= 2 && state.turnCount >= 12 ? 'FINAL BLUEPRINT AUDIT' : `Milestone ${state.currentMilestoneIndex + 1} Briefing`}
+                        </h3>
+                        <p className="text-primary font-black uppercase tracking-[0.3em] text-[9px] mb-8">Impact & Resource Audit</p>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
+                           <div className="space-y-4">
+                             <h4 className="font-black text-emerald-400 uppercase text-xs tracking-widest flex items-center gap-2">
+                               <CheckCircle size={14} /> Strategic Benefits
+                             </h4>
+                             <div className="space-y-3">
+                               {state.decisions.slice(-turnsPerMilestone).map((d: any, i) => (
+                                 <div key={i} className="bg-white/5 p-4 rounded-xl border border-white/5">
+                                   <p className="text-[8px] text-slate-500 uppercase font-black mb-1">{d.challenge.title}</p>
+                                   <p className="font-bold text-slate-200 text-sm">{d.chosenOption.text}</p>
                                  </div>
-                              </div>
-                              <p className="text-sm text-slate-500 leading-relaxed italic font-medium">"{f.message}"</p>
+                               ))}
+                             </div>
                            </div>
-                         ))}
+                           <div className="space-y-4">
+                             <h4 className="font-black text-amber-400 uppercase text-xs tracking-widest flex items-center gap-2">
+                               <AlertCircle size={14} /> Resource Burn
+                             </h4>
+                             <div className="space-y-3">
+                               {state.decisions.slice(-turnsPerMilestone).map((d: any, i) => (
+                                 <div key={i} className="bg-white/5 p-4 rounded-xl border border-white/5">
+                                   <p className="text-[8px] text-slate-500 uppercase font-black mb-1">{d.challenge.title}</p>
+                                   <p className="text-lg font-black text-red-400">-${(Math.abs(d.chosenOption.effect_budget) ?? 0).toLocaleString()}</p>
+                                 </div>
+                               ))}
+                             </div>
+                        </div>
                       </div>
-                   </div>
+
+                      <div className="flex flex-col md:flex-row gap-4">
+                        <button 
+                          onClick={() => {
+                            if (state.currentMilestoneIndex >= 2) {
+                              updateState({ status: 'completed' });
+                            } else {
+                              nextMilestone();
+                            }
+                          }}
+                          className="flex-1 bg-primary text-white py-5 rounded-2xl font-black text-lg shadow-xl hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3"
+                        >
+                          {state.currentMilestoneIndex >= 2 ? 'VIEW FINAL ANALYSIS' : 'PROCEED TO NEXT MILESTONE'} <ArrowRight />
+                        </button>
+                        <button 
+                          onClick={() => setActiveTab('boardroom')}
+                          className="group/btn relative px-8 py-5 bg-teal-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-teal-500 transition-all shadow-xl shadow-teal-900/10 overflow-hidden flex items-center gap-3"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-r from-teal-700 to-teal-800 translate-x-[-100%] group-hover/btn:translate-x-0 transition-transform duration-500" />
+                          <Users size={16} className="relative z-10" />
+                          <span className="relative z-10">Boardroom Simulation</span>
+                        </button>
+                      </div>
+                     </motion.div>
+                  ) : (
+                    <motion.section 
+                      animate={isShaking ? {
+                        x: [0, -10, 10, -10, 10, 0],
+                        transition: { duration: 0.4 }
+                      } : {}}
+                      className="bg-white p-8 rounded-[3rem] shadow-sm border-2 border-slate-100 flex flex-col min-h-[500px] relative overflow-hidden group"
+                    >
+                      <div className="relative z-10 flex-1 flex flex-col">
+                        <div className="flex items-center justify-between mb-6">
+                           <span className="bg-primary px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest text-white shadow-lg shadow-primary/20">Active Simulation</span>
+                           {!isGenerating && state.decisions.length > 0 && (
+                             <button onClick={handleUndo} className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-primary transition-all">
+                               <RotateCcw size={16} />
+                             </button>
+                           )}
+                        </div>
+
+                        {isGenerating ? (
+                          <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+                            <div className="relative">
+                              <div className="w-20 h-20 border-6 border-primary/10 border-t-primary rounded-full animate-spin" />
+                              <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary w-6 h-6 animate-pulse" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-slate-400 font-black tracking-[0.2em] uppercase text-[10px]">Synchronizing Social Landscape...</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="relative h-60 -mx-8 -mt-2 mb-8 overflow-hidden border-b-4 border-slate-50">
+                              <img 
+                                src={`https://picsum.photos/seed/${(state.currentChallenge as any)?.visual_keyword || 'impact'}/800/400`} 
+                                alt="Visual Context" 
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-[2000ms]"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent" />
+                            </div>
+                            <h3 className="text-3xl font-headline font-black text-on-surface mb-4 leading-tight tracking-tight">
+                              {typeof state.currentChallenge?.title === 'string' ? state.currentChallenge?.title : JSON.stringify(state.currentChallenge?.title)}
+                            </h3>
+                            <p className="text-lg text-slate-600 leading-relaxed mb-8 italic font-medium opacity-80">
+                              {typeof state.currentChallenge?.description === 'string' ? state.currentChallenge?.description : JSON.stringify(state.currentChallenge?.description)}
+                            </p>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-auto">
+                              {state.currentChallenge?.options.map((opt, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => handleDecision(opt)}
+                                  className="bg-slate-50 border-2 border-transparent p-6 rounded-[2rem] text-left hover:border-primary hover:bg-white transition-all group relative active:scale-[0.98] shadow-sm hover:shadow-xl"
+                                >
+                                  <p className="font-black text-on-surface text-lg mb-1 group-hover:text-primary transition-colors pr-8 leading-tight">
+                                    {typeof opt.text === 'string' ? opt.text : JSON.stringify(opt.text)}
+                                  </p>
+                                  <div className="w-8 h-8 rounded-xl bg-white border border-slate-100 flex items-center justify-center group-hover:bg-primary group-hover:border-primary transition-all absolute top-6 right-6">
+                                    <ArrowRight size={16} className="text-slate-300 group-hover:text-white" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </motion.section>
+                  )}
+
+                  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-6 flex items-center gap-3">
+                      <Users size={14} className="text-primary" /> Council Sentiment
+                    </h4>
+                    <div className="flex gap-6 overflow-x-auto pb-2 scrollbar-hide">
+                       {state.stakeholderFeedback.length === 0 ? (
+                         <div className="w-full text-center py-8 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-100">
+                            <p className="text-slate-400 font-bold italic text-sm">Observing baseline metrics...</p>
+                         </div>
+                       ) : (
+                         state.stakeholderFeedback.map((f) => (
+                           <div key={f.id} className="flex-shrink-0 w-80 bg-slate-50 p-6 rounded-[2rem] border-2 border-white hover:bg-white hover:shadow-lg transition-all group">
+                             <div className="flex items-center gap-3 mb-4">
+                               <img src={f.avatar} className="w-10 h-10 rounded-xl shadow-md border-2 border-white" alt={f.name} />
+                               <div>
+                                 <p className="text-sm font-black text-on-surface leading-tight">{f.name}</p>
+                                 <p className="text-[8px] text-primary uppercase font-black tracking-widest">{f.role}</p>
+                               </div>
+                             </div>
+                             <p className="text-xs text-slate-600 leading-relaxed italic font-medium">"{f.message}"</p>
+                           </div>
+                         ))
+                       )}
+                    </div>
+                  </div>
                 </motion.div>
               )}
-            </>
+            </React.Fragment>
           )}
         </AnimatePresence>
       </div>
 
-      {/* GAUGES SIDEBAR */}
-      <div className="col-span-12 lg:col-span-3 space-y-6">
-         <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] shadow-2xl sticky top-32">
-            <h5 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-700 text-center mb-10">System Vitals</h5>
-            <div className="space-y-10">
-               {[
-                 { label: 'Budget Runway', value: state.budget, max: 100000, color: 'text-emerald-400', bar: 'bg-emerald-400', icon: Wallet, prefix: '$' },
-                 { label: 'Impact Factor', value: state.socialImpact, max: 100, color: 'text-rose-500', bar: 'bg-rose-500', icon: Heart, suffix: '%' },
-                 { label: 'Stakeholder Trust', value: state.trust, max: 100, color: 'text-blue-400', bar: 'bg-blue-400', icon: Users, suffix: '%' },
-                 { label: 'Sustainability Index', value: operatingSustainability, max: 100, color: 'text-primary', bar: 'bg-primary', icon: TrendingUp, suffix: '%' }
-               ].map((v) => (
-                 <div key={v.label} className="space-y-3">
-                    <div className="flex justify-between items-end">
-                       <div className="flex items-center gap-3">
-                          <v.icon className={v.color} size={16} />
-                          <span className="text-[10px] font-black uppercase tracking-tighter text-slate-500">{v.label}</span>
-                       </div>
-                       <p className="text-xl font-black text-white">{v.prefix}{v.value.toLocaleString()}{v.suffix}</p>
-                    </div>
-                    <div className="h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-                       <motion.div 
-                         initial={{ width: 0 }}
-                         animate={{ width: `${Math.min(100, (v.value / v.max) * 100)}%` }}
-                         className={cn("h-full", v.bar)}
-                       />
-                    </div>
-                 </div>
-               ))}
-            </div>
+      <div className="col-span-12 lg:col-span-3 space-y-4">
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 sticky top-10">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-8 text-center flex items-center justify-center gap-2">
+            <div className="w-8 h-0.5 bg-slate-100" />
+            Core Vitals
+            <div className="w-8 h-0.5 bg-slate-100" />
+          </p>
+          
+          <div className="space-y-8">
+            {[
+              { 
+                label: 'Financial Runway', 
+                icon: Wallet, 
+                value: state.budget || 0, 
+                max: 100000, 
+                color: 'emerald', 
+                prefix: '$' 
+              },
+              { 
+                label: 'Social Impact', 
+                icon: Sparkles, 
+                value: state.socialImpact || 0, 
+                max: 100, 
+                color: 'primary', 
+                suffix: '%' 
+              },
+              { 
+                label: 'Stakeholder Trust', 
+                icon: Heart, 
+                value: state.trust || 0, 
+                max: 100, 
+                color: 'blue', 
+                suffix: '%' 
+              },
+              { 
+                label: 'Operational Sustainability', 
+                icon: TrendingUp, 
+                value: Math.round(((state.trust || 0) * 0.4) + ((state.socialImpact || 0) * 0.4) + (((state.budget || 0) / 100000) * 20)), 
+                max: 100, 
+                color: 'amber', 
+                suffix: '%' 
+              },
+            ].map((g) => (
+              <div key={g.label} className="space-y-3">
+                <div className="flex justify-between items-end">
+                   <div className="flex items-center gap-2">
+                      <div className={cn("p-2 rounded-lg border", `bg-${g.color}-50 text-${g.color}-600 border-${g.color}-100`)}>
+                        <g.icon size={14} />
+                      </div>
+                      <span className="text-[9px] font-black uppercase text-slate-500 tracking-tighter">{g.label}</span>
+                   </div>
+                   <span className="text-xl font-black text-on-surface">
+                     {g.prefix}{(g.value ?? 0).toLocaleString()}{g.suffix}
+                   </span>
+                </div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.min(100, (g.value / g.max) * 100)}%` }}
+                    className={cn(
+                      "h-full rounded-full transition-all duration-1000 shadow-inner",
+                      g.color === 'primary' ? "bg-primary" : `bg-${g.color}-500`
+                    )}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
 
-            <div className="mt-12 pt-8 border-t border-slate-800/50 space-y-4">
-               <div className="bg-slate-950 p-5 rounded-[1.5rem] border border-slate-800">
-                  <div className="flex items-center gap-2 mb-2">
-                     <AlertTriangle size={12} className="text-amber-500" />
-                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-600">Strategic Alert</label>
-                  </div>
-                  <p className="text-[11px] text-slate-400 font-medium leading-relaxed italic">
-                     {state.budget < 10000 ? "🚨 RUNWAY CRITICAL. SOURCE EMERGENCY FUNDING." : 
-                      state.trust < 40 ? "⚠️ TRUST BREACH. REDESIGN COMMUNITY CHANNELS." : 
-                      "✅ ALL SYSTEMS NOMINAL. MISSION IS STABLE."}
-                  </p>
+          <div className="mt-12 pt-8 border-t-2 border-slate-50 space-y-4">
+             <div className="bg-slate-50 p-4 rounded-[1.5rem] border-2 border-slate-100">
+               <div className="flex items-center gap-2 mb-2">
+                 <AlertTriangle size={12} className="text-amber-500" />
+                 <span className="text-[9px] font-black uppercase text-slate-400">Survival Report</span>
                </div>
-               <button onClick={exportCSV} className="w-full flex items-center justify-center gap-3 py-5 bg-primary/10 hover:bg-primary border border-primary/20 text-primary hover:text-slate-950 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all group">
-                  <Download size={18} className="group-hover:translate-y-0.5 transition-all" /> Strategy Report
-               </button>
-            </div>
-         </div>
+               <p className="text-[11px] text-slate-600 leading-relaxed font-medium">
+                 {state.budget < 10000 ? "🚨 INSUFFICIENT FUNDS. RUNWAY DEPLETED." : 
+                  state.trust < 40 ? "⚠️ TRUST BREACH. STAKEHOLDERS RETREATING." : 
+                  "✅ MODEL STABLE. PROCEED WITH GROWTH."}
+               </p>
+             </div>
+             
+             <button 
+               onClick={exportCSV}
+               className="w-full flex items-center justify-center gap-2 py-4 bg-primary/5 border-2 border-primary/10 rounded-2xl text-xs font-black text-primary hover:bg-primary hover:text-white transition-all shadow-sm group"
+             >
+               <Download size={16} className="group-hover:translate-y-0.5 transition-transform" /> Project Report
+             </button>
+          </div>
+        </div>
       </div>
     </div>
   );

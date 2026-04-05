@@ -11,8 +11,7 @@ import {
   Loader2,
   Plus,
   Sparkles,
-  LayoutGrid,
-  Clock
+  Brain
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
@@ -24,9 +23,13 @@ import { toast } from 'sonner';
 
 export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [cloudSims, setCloudSims] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const { user } = useAuth();
-  const { startNewSimulation, state, localSims } = useSimulation();
+  const { startNewSimulation, state, localSims, updateState, t } = useSimulation();
+
+  const allSims = [
+    ...cloudSims,
+    ...localSims.filter(ls => !cloudSims.some(cs => cs.id === ls.id))
+  ].sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
 
   useEffect(() => {
     if (!user) return;
@@ -37,209 +40,268 @@ export function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => voi
       snapshot.forEach((doc) => {
         sims.push({ id: doc.id, ...doc.data() });
       });
-      
       setCloudSims(sims);
-      setLoading(false);
     });
 
     return unsubscribe;
   }, [user]);
 
-  const filteredSims = [
-    ...cloudSims,
-    ...localSims.filter(ls => !cloudSims.some(cs => cs.id === ls.id))
-  ].sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
-  .filter(s => {
-    if (!state.searchQuery) return true;
-    const q = state.searchQuery.toLowerCase();
-    return s.title?.toLowerCase().includes(q) || s.description?.toLowerCase().includes(q);
-  });
-
-  const initials = user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'AR';
-
-  if (loading) {
-    return (
-      <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
-        <Loader2 className="animate-spin text-primary" size={40} />
-        <p className="text-slate-500 font-black uppercase tracking-widest text-xs">Syncing Portfolio...</p>
-      </div>
-    );
-  }
-
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-12 pb-20"
+      className="space-y-20 pb-20"
     >
-      {/* Header Section */}
-      <section className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <label className="text-primary text-xs font-black uppercase tracking-[0.3em] mb-4 block">Simulation Overview</label>
-          <h2 className="text-6xl font-black text-white leading-tight tracking-tight italic">
-            Founder <span className="bg-gradient-to-r from-primary to-fuchsia-500 bg-clip-text text-transparent">Dashboard.</span>
-          </h2>
+      {/* Welcome Section */}
+      <div className="grid grid-cols-12 gap-10 items-end">
+        <div className="col-span-12 lg:col-span-8">
+          <motion.span 
+            initial={{ opacity: 0, x: -10 }} 
+            animate={{ opacity: 1, x: 0 }}
+            className="text-[10px] font-black text-secondary tracking-[0.4em] uppercase block mb-4"
+          >
+            {t('strategic_hub')}
+          </motion.span>
+          <h1 className="text-6xl font-headline font-black text-on-surface tracking-tighter leading-[0.9]">
+            {t('welcome')}, <span className="bg-gradient-to-r from-teal-600 to-emerald-600 bg-clip-text text-transparent italic">{user?.displayName?.split(' ')[0] || 'Architect'}.</span><br />
+            <span className="opacity-40">{t('next_move')}</span>
+          </h1>
         </div>
-        <div className="flex items-center gap-3 bg-slate-900 px-6 py-4 rounded-[2rem] border border-slate-800 shadow-2xl">
-          <Clock className="text-primary" size={20} />
-          <span className="text-white font-bold">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
-        </div>
-      </section>
-
-      {/* Stats Quick Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { label: 'Active Sims', value: filteredSims.length, icon: LayoutGrid, color: 'text-primary', bg: 'bg-primary/10' },
-          { label: 'Impact Score', value: state.impactScore.toLocaleString(), icon: Heart, color: 'text-rose-500', bg: 'bg-rose-500/10' },
-          { label: 'Public Trust', value: `${state.trust}%`, icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10' },
-          { label: 'Operating Capital', value: `$${state.budget.toLocaleString()}`, icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
-        ].map((stat, i) => (
-          <div key={i} className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-xl group hover:border-primary/30 transition-all">
-            <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-6 shadow-lg", stat.bg)}>
-              <stat.icon className={stat.color} size={24} />
-            </div>
-            <p className="text-3xl font-black text-white tracking-tighter">{stat.value}</p>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-1">{stat.label}</p>
+        <div className="col-span-12 lg:col-span-4 flex justify-end">
+          <div className="glass-card px-6 py-4 rounded-2xl flex items-center gap-4 shadow-sm border border-white/50">
+             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+             <p className="text-xs font-black uppercase tracking-widest text-slate-500">{t('system_ready')}</p>
           </div>
-        ))}
+        </div>
       </div>
 
-      {/* Main Content Layout */}
-      <div className="grid grid-cols-12 gap-8">
-        {/* Hero Active Card */}
-        <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-[3rem] bg-slate-900 p-12 flex flex-col justify-between min-h-[450px] shadow-2xl border border-slate-800 group">
-          {filteredSims.length > 0 ? (
+      {/* Bento Grid */}
+      <div className="grid grid-cols-12 gap-10">
+        {/* Main Hero Card */}
+        <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-[3rem] bg-slate-950 p-12 flex flex-col justify-between min-h-[480px] shadow-2xl group">
+          {allSims.length > 0 ? (
             <>
-              <div className="absolute inset-0 opacity-40 transition-transform duration-[2s] group-hover:scale-110">
+              <div className="absolute inset-0 opacity-50 transition-transform duration-[4s] group-hover:scale-110 ease-out">
                 <img 
-                  src={filteredSims[0].image || "https://picsum.photos/seed/yukti/800/600"} 
+                  src={allSims[0].image} 
                   alt="Background" 
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
                 />
               </div>
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/60 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/20 to-transparent" />
               <div className="relative z-10">
-                <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-950/80 text-primary text-[10px] font-black backdrop-blur-md mb-8 uppercase tracking-[0.2em] border border-white/5">
-                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-                  Active Strategic Deployment
-                </span>
-                <h2 className="text-6xl font-black text-white mb-6 leading-tight tracking-tighter italic line-clamp-1">{filteredSims[0].title}</h2>
-                <p className="text-slate-300 max-w-xl text-xl leading-relaxed line-clamp-2 mb-10 opacity-90 font-medium">
-                  {filteredSims[0].description}
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }} 
+                  animate={{ opacity: 1, y: 0 }}
+                  className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 text-teal-300 text-[10px] font-black uppercase tracking-[0.3em] mb-8"
+                >
+                  <Sparkles size={14} className="text-teal-400" />
+                  {t('primary_mission')}
+                </motion.div>
+                <h2 className="text-6xl font-headline font-black text-white mb-6 line-clamp-2 leading-[0.95] tracking-tighter group-hover:tracking-tight transition-all duration-500">{allSims[0].title}</h2>
+                <p className="text-slate-300 max-w-xl font-body text-xl leading-relaxed line-clamp-2 mb-12 opacity-80 italic">
+                  "{allSims[0].description}"
                 </p>
               </div>
-              <div className="relative z-10 flex items-center gap-4">
+              <div className="relative z-10 flex items-center gap-6">
                 <button 
-                  onClick={async () => {
-                    const sim = filteredSims[0];
-                    await startNewSimulation({
-                      id: sim.id,
-                      name: sim.title,
-                      region: sim.category,
-                      pitch: sim.pitch,
-                      location: sim.location,
-                      stage: sim.stage
-                    });
-                    setActiveTab('workspace');
-                  }} 
-                  className="bg-primary hover:bg-primary-container text-slate-950 px-12 py-5 rounded-[2rem] font-black text-xl transition-all shadow-2xl shadow-primary/30 flex items-center gap-3 active:scale-95"
+                  onClick={() => setActiveTab('workspace')} 
+                  className="bg-white text-slate-900 px-12 py-5 rounded-[2rem] font-black text-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-4 shadow-2xl shadow-white/5"
                 >
-                  Resume Mission <ArrowRight size={20} />
+                  Resume Laboratory <ArrowRight size={22} className="group-hover:translate-x-2 transition-transform" />
                 </button>
+                <div className="flex -space-x-3">
+                   {[1,2,3].map(i => (
+                     <div key={i} className="w-10 h-10 rounded-full border-2 border-slate-900 overflow-hidden bg-slate-800">
+                        <img src={`https://i.pravatar.cc/100?u=stakeholder${i}`} alt="Stakeholder" className="w-full h-full object-cover" />
+                     </div>
+                   ))}
+                   <div className="w-10 h-10 rounded-full border-2 border-slate-900 bg-teal-600 flex items-center justify-center text-[10px] font-black text-white">
+                      +12
+                   </div>
+                </div>
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col justify-center items-center text-center p-12">
-               <div className="w-24 h-24 bg-slate-950 rounded-[2rem] border border-slate-800 flex items-center justify-center text-slate-700 mb-8">
-                  <Plus size={48} />
-               </div>
-               <h3 className="text-4xl font-black text-white mb-4 italic">No simulations found.</h3>
-               <p className="text-slate-500 max-w-sm text-lg mb-10">You haven't started any simulations yet, or your search didn't match any results.</p>
-               <button 
-                 onClick={() => setActiveTab('hub')}
-                 className="bg-primary hover:bg-primary-container text-slate-950 px-10 py-5 rounded-[2rem] font-black text-xl transition-all shadow-2xl shadow-primary/20"
-               >
-                 Go to Simulation Hub
-               </button>
+            <div className="flex-1 flex flex-col justify-center items-center text-center space-y-8">
+              <div className="w-24 h-24 bg-white/5 rounded-[2rem] flex items-center justify-center text-white/20 mb-2 border border-white/10 animate-pulse">
+                 <Plus size={48} />
+              </div>
+              <div>
+                <h2 className="text-5xl font-headline font-black text-white mb-4 leading-tight tracking-tighter">Your Hub is Empty.</h2>
+                <p className="text-slate-400 max-w-md font-body text-xl opacity-60 italic">"The best way to predict the future is to simulate it."</p>
+              </div>
+              <button 
+                onClick={() => setActiveTab('hub')}
+                className="bg-primary text-white px-12 py-5 rounded-[2rem] font-black text-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-4 shadow-xl"
+              >
+                Launch Discovery <Sparkles size={22} />
+              </button>
             </div>
           )}
         </div>
 
-        {/* Side Progress Stack */}
-        <div className="col-span-12 lg:col-span-4 space-y-6">
-           <div className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-xl">
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-8">Financial Health</h4>
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-3xl font-black text-white tracking-tighter">${state.budget.toLocaleString()}</p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-primary mt-1">Available Runway</p>
-                  </div>
-                  <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                    <TrendingUp size={28} />
-                  </div>
-                </div>
-                <div className="pt-6 border-t border-slate-800">
-                  <div className="flex justify-between text-xs font-black uppercase tracking-widest mb-3">
-                    <span className="text-slate-500">Stability Index</span>
-                    <span className="text-white">{Math.round((state.budget / 10000) * 100)}%</span>
-                  </div>
-                  <div className="h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, (state.budget / 10000) * 100)}%` }}
-                      className="h-full bg-primary"
-                    />
-                  </div>
-                </div>
+        {/* Metrics Vertical Stack */}
+        <div className="col-span-12 lg:col-span-4 flex flex-col gap-8">
+          <motion.div 
+            whileHover={{ y: -5 }}
+            className="bg-white p-10 rounded-[2.5rem] flex flex-col justify-between flex-1 premium-shadow border border-slate-100/50 group"
+          >
+            <div className="flex justify-between items-start mb-8">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Social Impact Score</span>
+              <div className="w-12 h-12 rounded-2xl bg-teal-50 flex items-center justify-center text-teal-600 group-hover:bg-teal-600 group-hover:text-white transition-all">
+                <Heart size={24} />
               </div>
-           </div>
+            </div>
+            <div>
+              <div className="text-5xl font-headline font-black text-on-surface tracking-tighter">{state.impactScore}</div>
+              <div className="flex items-center gap-3 mt-4">
+                <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden">
+                   <motion.div initial={{ width: 0 }} animate={{ width: `${state.impactScore}%` }} className="h-full bg-teal-500" />
+                </div>
+                <span className="text-xs font-black text-teal-600 uppercase">Mastery Level</span>
+              </div>
+            </div>
+          </motion.div>
 
-           <div className="bg-slate-950 rounded-[2.5rem] border-2 border-dashed border-slate-800 p-8 flex flex-col items-center justify-center text-center group hover:border-primary/50 transition-all cursor-pointer" onClick={() => setActiveTab('lexicon')}>
-              <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center text-slate-500 group-hover:text-primary mb-4 transition-colors">
-                <Sparkles size={24} />
+          <motion.div 
+            whileHover={{ y: -5 }}
+            className="bg-white p-10 rounded-[2.5rem] flex flex-col justify-between flex-1 premium-shadow border border-slate-100/50 group"
+          >
+            <div className="flex justify-between items-start mb-8">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Stakeholder Trust</span>
+              <div className="w-12 h-12 rounded-2xl bg-secondary/10 flex items-center justify-center text-secondary group-hover:bg-secondary group-hover:text-white transition-all">
+                <Users size={24} />
               </div>
-              <p className="text-white font-bold">Founder Lexicon</p>
-              <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mt-1">Learn Startup Terms</p>
-           </div>
+            </div>
+            <div>
+              <div className="text-5xl font-headline font-black text-on-surface tracking-tighter">{state.trust}%</div>
+              <div className="flex items-center gap-3 mt-4">
+                <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden">
+                   <motion.div initial={{ width: 0 }} animate={{ width: `${state.trust}%` }} className="h-full bg-secondary" />
+                </div>
+                <span className="text-xs font-black text-secondary uppercase">Approval Rating</span>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            whileHover={{ y: -5, scale: 1.02 }}
+            onClick={() => setActiveTab('boardroom')}
+            className="bg-teal-950 p-10 rounded-[2.5rem] flex flex-col justify-between flex-1 shadow-2xl border border-white/10 group cursor-pointer relative overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-teal-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="flex justify-between items-start mb-8 relative z-10">
+              <span className="text-[10px] font-black text-teal-400 uppercase tracking-[0.3em]">Master Feature</span>
+              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-teal-400 group-hover:bg-teal-400 group-hover:text-teal-950 transition-all border border-white/10">
+                <Brain size={24} />
+              </div>
+            </div>
+            <div className="relative z-10">
+              <div className="text-3xl font-headline font-black text-white tracking-tighter mb-2">Executive Boardroom</div>
+              <p className="text-[10px] font-black text-teal-300/60 uppercase tracking-widest flex items-center gap-2">
+                 Launch AI Simulation <ArrowRight size={12} />
+              </p>
+            </div>
+          </motion.div>
         </div>
       </div>
 
-      {/* Portfolio Grid */}
-      <section>
-        <div className="flex items-center justify-between mb-8 px-4">
-          <h3 className="text-2xl font-black text-white italic tracking-tight">Recent <span className="text-primary">Deployments.</span></h3>
-          <button onClick={() => setActiveTab('hub')} className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-primary transition-colors">View All Hub</button>
+      {/* Secondary Row */}
+      <div className="grid grid-cols-12 gap-10">
+        {/* Financial Sustainability */}
+        <div className="col-span-12 lg:col-span-5 bg-white p-12 rounded-[3rem] premium-shadow border border-slate-100/50">
+          <div className="flex justify-between items-center mb-10">
+            <h3 className="font-headline font-black text-2xl text-on-surface tracking-tight">Sustainability</h3>
+            <div className="p-2 bg-slate-50 rounded-lg text-slate-400"><TrendingUp size={20} /></div>
+          </div>
+          <div className="space-y-10">
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Operating Capital</p>
+                <p className="text-4xl font-headline font-black text-on-surface tracking-tighter">${(state.budget ?? 0).toLocaleString()}</p>
+              </div>
+              <div className="h-20 w-40 flex items-end gap-1.5">
+                {[30, 50, 45, 70, 85, 100].map((h, i) => (
+                  <motion.div 
+                    initial={{ height: 0 }}
+                    animate={{ height: `${h}%` }}
+                    transition={{ delay: i * 0.1 }}
+                    key={i} 
+                    className={cn(
+                      "w-full rounded-t-lg transition-colors",
+                      i === 5 ? "bg-primary" : "bg-primary/20 hover:bg-primary/40"
+                    )} 
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="pt-10 border-t border-slate-100">
+               <div className="flex justify-between mb-3 text-xs font-black uppercase tracking-widest text-slate-400">
+                  <span>Economic Runway</span>
+                  <span className="text-teal-600">{Math.max(1, Math.round((state.budget || 1000) / 1500))} Cycles remaining</span>
+               </div>
+               <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden p-0.5">
+                  <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(100, (state.budget / 20000) * 100)}%` }} />
+               </div>
+            </div>
+          </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-           {filteredSims.slice(1, 4).map((sim) => (
-             <article key={sim.id} className="bg-slate-900 rounded-[2.5rem] border border-slate-800 p-6 shadow-xl hover:border-primary/50 transition-all group">
-                <div className="flex items-center gap-4 mb-6">
-                   <div className="w-14 h-14 rounded-2xl overflow-hidden bg-slate-950 border border-slate-800">
-                      <img src={sim.image} className="w-full h-full object-cover" alt="" />
-                   </div>
-                   <div className="flex-1 min-w-0">
-                      <h4 className="text-lg font-black text-white truncate leading-tight">{sim.title}</h4>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{sim.category}</p>
-                   </div>
-                </div>
-                <div className="flex items-center justify-between pt-6 border-t border-slate-800">
-                   <div className="text-[10px] font-black uppercase tracking-widest text-slate-600">Progress: <span className="text-white">{sim.progress || 0}%</span></div>
-                   <button 
-                     onClick={async () => {
-                        await startNewSimulation({ id: sim.id, name: sim.title, region: sim.category, pitch: sim.pitch });
-                        setActiveTab('workspace');
-                     }}
-                     className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-500 group-hover:text-primary transition-all"
-                   >
-                     <ChevronRight size={16} />
-                   </button>
-                </div>
-             </article>
-           ))}
+
+        {/* Portfolio Feed */}
+        <div className="col-span-12 lg:col-span-7 bg-white p-12 rounded-[3rem] premium-shadow border border-slate-100/50">
+          <div className="flex justify-between items-center mb-10">
+             <h3 className="font-headline font-black text-2xl text-on-surface tracking-tight">Venture Portfolio</h3>
+             <button onClick={() => setActiveTab('hub')} className="text-[10px] font-black uppercase tracking-[0.2em] text-teal-600 hover:text-teal-800 transition-colors">Launch New Lab +</button>
+          </div>
+          <div className="space-y-6">
+             {allSims.length > 0 ? (
+               allSims.slice(0, 3).map((sim, idx) => (
+                 <motion.button
+                   whileHover={{ x: 10 }}
+                   key={sim.id || idx}
+                   onClick={async () => {
+                     await startNewSimulation({
+                       id: sim.id,
+                       name: sim.title,
+                       region: sim.category,
+                       pitch: sim.pitch,
+                       location: sim.location,
+                       stage: sim.stage
+                     });
+                     setActiveTab('workspace');
+                     toast.success(`Resumed: ${sim.title}`);
+                   }}
+                   className="w-full flex items-center gap-6 p-5 rounded-[2rem] hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100 text-left group"
+                 >
+                    <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200">
+                       <img src={sim.image} alt={sim.title} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1">
+                       <div className="flex justify-between items-baseline mb-1">
+                          <h4 className="font-headline font-black text-on-surface group-hover:text-primary transition-colors tracking-tight">{sim.title}</h4>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{sim.category}</span>
+                       </div>
+                       <div className="flex items-center gap-3">
+                          <div className="h-1 flex-1 bg-slate-100 rounded-full overflow-hidden">
+                             <div className="h-full bg-teal-500/40 group-hover:bg-teal-500 transition-colors" style={{ width: `${sim.progress || 0}%` }} />
+                          </div>
+                          <span className="text-[10px] font-black text-slate-500">{sim.progress || 0}% Progress</span>
+                       </div>
+                    </div>
+                    <ChevronRight size={18} className="text-slate-300 group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                 </motion.button>
+               ))
+             ) : (
+               <div className="h-40 flex items-center justify-center border-2 border-dashed border-slate-100 rounded-[2.5rem]">
+                  <p className="text-slate-400 font-bold text-sm tracking-tight">No ventures registered. Start your first in the Strategy Lab.</p>
+               </div>
+             )}
+          </div>
         </div>
-      </section>
+      </div>
     </motion.div>
   );
 }
+

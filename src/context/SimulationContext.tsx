@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
 import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { TRANSLATIONS } from '../lib/translations';
 
 export interface ChallengeOption {
   text: string;
@@ -43,7 +44,7 @@ export interface SimulationState {
   region: string;
   status: 'idle' | 'active' | 'completed';
   lastDecision?: string;
-  pitch?: string;
+  pitch: string;
   location?: string;
   stage?: string;
   currentChallenge?: Challenge;
@@ -72,7 +73,12 @@ export interface SimulationState {
     type: 'success' | 'warning' | 'info' | 'error';
   }[];
   draftIdea?: string;
-  searchQuery: string;
+  showBoardroom?: boolean;
+  mentorFeedback?: {
+    critique: string;
+    improvement: string;
+    consequences: string;
+  } | null;
 }
 
 export interface SimulationContextType {
@@ -83,7 +89,7 @@ export interface SimulationContextType {
   addLocalSimulation: (sim: any) => void;
   resetSimulation: () => Promise<void>;
   undoDecision: () => Promise<void>;
-  setSearchQuery: (query: string) => void;
+  t: (key: string) => string;
 }
 
 const initialState: SimulationState = {
@@ -110,7 +116,9 @@ const initialState: SimulationState = {
   stakeholderFeedback: [],
   notifications: [],
   draftIdea: '',
-  searchQuery: '',
+  pitch: '',
+  showBoardroom: false,
+  mentorFeedback: null,
 };
 
 const SimulationContext = createContext<SimulationContextType | undefined>(undefined);
@@ -204,7 +212,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
       impactScore: 50,
       socialImpact: 50,
       budget: 50000,
-      trust: 50,
+      trust: 100,
       momentum: 50,
       currentPhase: 'discovery',
       pitch: scenario.pitch || '',
@@ -242,6 +250,10 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
   const undoDecision = async () => {
     if (!auth.currentUser || state.decisions.length === 0) return;
     
+    const activePitch = state.pitch || state.draftIdea || '';
+    const hasPitch = activePitch.trim().length > 0;
+    const hasStage = state.stage && state.stage.trim().length > 0;
+    
     const lastDecision = state.decisions[state.decisions.length - 1];
     const newDecisions = state.decisions.slice(0, -1);
     
@@ -261,12 +273,13 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     await setDoc(doc(db, 'users', auth.currentUser.uid, 'simulations', 'active'), newState);
   };
 
-  const setSearchQuery = (query: string) => {
-    setState(prev => ({ ...prev, searchQuery: query }));
+  const t = (key: string): string => {
+    const lang = state.gameLanguage || 'English';
+    return TRANSLATIONS[lang]?.[key] || TRANSLATIONS['English']?.[key] || key;
   };
 
   return (
-    <SimulationContext.Provider value={{ state, localSims, updateState, startNewSimulation, addLocalSimulation, resetSimulation, undoDecision, setSearchQuery }}>
+    <SimulationContext.Provider value={{ state, localSims, updateState, startNewSimulation, addLocalSimulation, resetSimulation, undoDecision, t }}>
       {!loading && children}
     </SimulationContext.Provider>
   );

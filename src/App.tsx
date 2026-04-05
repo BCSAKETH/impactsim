@@ -4,7 +4,6 @@ import { Dashboard } from './components/Dashboard';
 import { SimulationHub } from './components/SimulationHub';
 import { ActiveWorkspace } from './components/ActiveWorkspace';
 import { SprintGame } from './components/SprintGame';
-import { FounderLexicon } from './components/FounderLexicon';
 import { AnimatePresence, motion } from 'motion/react';
 import { LoginView } from './components/Auth';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -13,16 +12,19 @@ import { SimulationProvider, useSimulation } from './context/SimulationContext';
 
 import { Toaster } from 'sonner';
 
+import { StartupDictionary } from './components/StartupDictionary';
+import { AIMeetingRoom } from './components/AIMeetingRoom';
+
 function AppContent() {
   const { user, loading } = useAuth();
-  const { state } = useSimulation();
+  const { state, updateState } = useSimulation();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [customSprintIdea, setCustomSprintIdea] = useState<string | null>(null);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 gap-6">
-        <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin shadow-2xl shadow-primary/20"></div>
-        <p className="text-primary font-black uppercase tracking-[0.4em] text-[10px] animate-pulse">Initializing Yukti Engine...</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-12 h-12 border-4 border-teal-900/10 border-t-teal-900 rounded-full animate-spin"></div>
       </div>
     );
   }
@@ -31,15 +33,20 @@ function AppContent() {
     return <LoginView />;
   }
 
+  const handleSprint = (idea: string) => {
+    setCustomSprintIdea(idea);
+    setActiveTab('sprint');
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 selection:bg-primary/20">
+    <div className="min-h-screen mesh-gradient-light selection:bg-primary/20 relative">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       
       <div className="ml-64 min-h-screen flex flex-col">
         <TopBar activeTab={activeTab} setActiveTab={setActiveTab} />
         
         <main className="flex-1 mt-20 p-10 lg:p-16 max-w-7xl mx-auto w-full">
-          <AnimatePresence mode="wait">
+          <AnimatePresence>
             <motion.div 
               key={activeTab}
               initial={{ opacity: 0, x: 20 }}
@@ -48,22 +55,29 @@ function AppContent() {
               transition={{ duration: 0.2 }}
             >
               {activeTab === 'dashboard' && <Dashboard setActiveTab={setActiveTab} />}
-              {activeTab === 'hub' && <SimulationHub setActiveTab={setActiveTab} />}
-              {activeTab === 'lexicon' && <FounderLexicon />}
-              {activeTab === 'workspace' && <ActiveWorkspace />}
+              {activeTab === 'hub' && <SimulationHub setActiveTab={setActiveTab} onSprint={handleSprint} />}
+              {activeTab === 'workspace' && <ActiveWorkspace setActiveTab={setActiveTab} />}
+              {activeTab === 'boardroom' && <AIMeetingRoom onClose={() => setActiveTab('hub')} />}
+              {activeTab === 'dictionary' && <StartupDictionary />}
               {activeTab === 'sprint' && <SprintGame 
-                idea={state.draftIdea || state.pitch || ''} 
+                idea={customSprintIdea || state.draftIdea || ''} 
                 language={state.gameLanguage || 'English'} 
-                onComplete={() => setActiveTab('workspace')}
-                onCancel={() => setActiveTab('dashboard')}
+                onComplete={() => {
+                  setCustomSprintIdea(null);
+                  setActiveTab('workspace');
+                }}
+                onCancel={() => {
+                  setCustomSprintIdea(null);
+                  setActiveTab('dashboard');
+                }}
               />}
             </motion.div>
           </AnimatePresence>
         </main>
 
-        <footer className="p-10 border-t border-white/5 bg-slate-950 text-center relative z-10">
-          <p className="text-slate-600 text-[10px] font-black uppercase tracking-[0.5em] italic">
-            Yukti Simulation Engine • Visionary Architect v4.2.0 • Forge Your Impact
+        <footer className="p-10 border-t border-slate-200 bg-white/50 text-center">
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">
+            Yukti © 2026 • Visionary Architect Simulation Engine v4.2.0
           </p>
         </footer>
       </div>
